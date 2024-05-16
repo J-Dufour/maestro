@@ -14,6 +14,56 @@ type SoundSource interface {
 	SetWaveFormat(format *WaveFormatExtensible) error
 }
 
+type Player struct {
+	client *AudioClient
+
+	data    chan []byte
+	control chan int
+
+	queueTail chan int
+
+	Done chan int
+}
+
+func NewPlayer(sources ...SoundSource) (player *Player, err error) {
+	player = &Player{}
+	player.data = make(chan []byte, 10)
+	player.control = make(chan int)
+	player.queueTail = make(chan int, 1)
+	player.queueTail <- 1
+	player.Done = make(chan int)
+
+	// make player thread
+	client, format, err := initDefaultClient()
+	player.client = client
+	if err != nil {
+		return nil, err
+	}
+	go musicPlayer(player.client, format, player.data, player.control, player.Done)
+
+	// add sources to queue
+	for _, source := range sources {
+		source.SetWaveFormat(format)
+		player.AddSourceToQueue(source)
+	}
+
+	return player, nil
+}
+
+func (p *Player) Start() {
+	p.client.Start()
+}
+
+func (p *Player) Stop() {
+	p.client.Stop()
+}
+
+func (p *Player) AddSourceToQueue(s SoundSource) {
+	newTail := make(chan int)
+	go musicReader(s, p.data, p.queueTail, newTail)
+	p.queueTail = newTail
+}
+
 func main() {
 
 	// startup
@@ -35,36 +85,24 @@ func main() {
 		return
 	}
 
-	reader, err := GetSourceReaderFromFile(os.Args[1])
+	sources := make([]SoundSource, 0)
+	for _, fileName := range os.Args[1:] {
+		source, err := GetSourceReaderFromFile(fileName)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		sources = append(sources, source)
+	}
+
+	player, err := NewPlayer(sources...)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-
-	// get audio client
-	client, format, err := initDefaultClient()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	reader.SetWaveFormat(format)
-
-	// make channels
-	dataChan := make(chan []byte, 10)
-	controlChan := make(chan int)
-
-	startReader := make(chan int, 1)
-	readerDone := make(chan int)
-	playerDone := make(chan int)
-	// start goroutines
-	startReader <- 1 // start reader immediately
-	client.Start()
-	go musicReader(reader, dataChan, startReader, readerDone)
-	go musicPlayer(client, format, dataChan, controlChan, playerDone)
-	<-readerDone    // wait until reader finishes
-	close(dataChan) // close data channel
-	<-playerDone    //wait until player finishes
+	player.Start()
+	<-player.Done
 }
 
 func initDefaultClient() (client *AudioClient, format *WaveFormatExtensible, err error) {
