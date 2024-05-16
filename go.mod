@@ -1,4 +1,4 @@
-module github.com/J-Dufour/jukebox
+module github.com/J-Dufour/maestro
 
 go 1.22.1
 
