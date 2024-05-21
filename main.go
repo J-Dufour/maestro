@@ -197,21 +197,18 @@ func musicPlayer(client *AudioClient, format *WaveFormatExtensible, dataBuf chan
 	//get frame size
 	frameSize := int(format.nBlockAlign)
 
-	// create leftover data
-	leftover := make([]byte, 0)
-
 	// create clock
 	clock := time.NewTicker(100 * time.Millisecond)
 
 	dataChanClosed := false
-	for len(leftover) > 0 || !dataChanClosed {
+	for !dataChanClosed {
 		select {
 		case op := <-control:
 			if op == 0 {
 				break
 			}
 		case <-clock.C:
-			//Get buffer
+			// Get buffer
 			padding, err := client.GetCurrentPadding()
 			if err != nil {
 				fmt.Println(err)
@@ -226,44 +223,27 @@ func musicPlayer(client *AudioClient, format *WaveFormatExtensible, dataBuf chan
 				return nil
 			}
 
-			//load leftover data into accumulator
+			// initialize buffer
 			freeData := freeFrames * uint32(frameSize)
 			acc := make([]byte, freeData)
-			copy(acc, leftover)
 
-			leftoverLen := len(leftover)
-
-			// if buffer can fit more data, grab from channel
-			if leftoverLen < int(freeData) {
-				leftover = leftover[:0]
-				freeData -= uint32(leftoverLen)
-				moreData := true
-
-				// load until full or nothing in channel
-				for moreData {
-					select {
-					case frames, open := <-dataBuf:
-						dataChanClosed = !open
-						copied := copy(acc[len(acc)-int(freeData):], frames)
-						freeData -= uint32(copied)
-						//buffer full
-						if copied < len(frames) {
-							leftover = frames[copied:]
-							moreData = false
-						}
-
-						if dataChanClosed {
-							moreData = false
-						}
-					default:
-						moreData = false // if no data, move on
-						//shrink acc to acutal data
-						totalCopied := len(acc) - int(freeData)
-						acc = acc[:totalCopied]
+			// load until full or nothing in channel
+			total := 0
+			i := 0
+			dataAvailable := true
+			for i < int(freeFrames) && dataAvailable {
+				select {
+				case frame, open := <-dataBuf:
+					dataChanClosed = !open
+					total += copy(acc[i*frameSize:], frame)
+					if dataChanClosed {
+						dataAvailable = false
 					}
+				default:
+					acc = acc[:total]
+					dataAvailable = false
 				}
-			} else {
-				leftover = leftover[freeData:]
+				i++
 			}
 
 			// copy accumulated data into real buffer
