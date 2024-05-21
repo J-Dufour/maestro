@@ -101,8 +101,31 @@ func main() {
 		fmt.Println(err)
 		return
 	}
+
+	//start UI
+	comChan := make(chan Com, 3)
+	root, initLoop := InitTerminalLoop(20, comChan)
+
 	player.Start()
-	<-player.Done
+
+	//make static queue view
+	maxLength := len(os.Args[1])
+	for _, arg := range os.Args[2:] {
+		if maxLength < len(arg) {
+			maxLength = len(arg)
+		}
+	}
+	queueWin := root.NewChild(Box{0, 0, uint(7 + maxLength), uint(4 + len(os.Args[1:]))})
+
+	comChan <- queueWin.DrawBox(Box{0, 0, queueWin.w, queueWin.h}, " Queue ")
+	listCom := queueWin.GetOffsetComBuilder().Offset(1, 1)
+	for i, name := range os.Args[1:] {
+		listCom.MoveLines(1).Offset(2, 0).Write(i+1, ". ", name)
+	}
+
+	comChan <- listCom.BuildCom()
+
+	initLoop()
 }
 
 func initDefaultClient() (client *AudioClient, format *WaveFormatExtensible, err error) {
