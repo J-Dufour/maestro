@@ -28,7 +28,7 @@ type Player struct {
 
 func NewPlayer(sources ...SoundSource) (player *Player, err error) {
 	player = &Player{}
-	player.data = make(chan []byte, 8192)
+	player.data = make(chan []byte)
 	player.control = make(chan int)
 	player.queueTail = make(chan int, 1)
 	player.queueTail <- 1
@@ -239,7 +239,7 @@ func musicPlayer(client *AudioClient, format *WaveFormatExtensible, dataBuf chan
 					if dataChanClosed {
 						dataAvailable = false
 					}
-				default:
+				case <-time.After(time.Millisecond):
 					acc = acc[:total]
 					dataAvailable = false
 				}
