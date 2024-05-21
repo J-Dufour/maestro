@@ -12,6 +12,7 @@ import (
 type SoundSource interface {
 	ReadNext() ([]byte, error)
 	SetWaveFormat(format *WaveFormatExtensible) error
+	GetWaveFormat() (*WaveFormatExtensible, error)
 }
 
 type Player struct {
@@ -27,7 +28,7 @@ type Player struct {
 
 func NewPlayer(sources ...SoundSource) (player *Player, err error) {
 	player = &Player{}
-	player.data = make(chan []byte, 10)
+	player.data = make(chan []byte, 8192)
 	player.control = make(chan int)
 	player.queueTail = make(chan int, 1)
 	player.queueTail <- 1
@@ -291,14 +292,18 @@ func musicPlayer(client *AudioClient, format *WaveFormatExtensible, dataBuf chan
 
 func musicReader(source SoundSource, dataBuf chan []byte, start chan int, done chan int) {
 	<-start
+	format, _ := source.GetWaveFormat()
+	frameSize := format.nBlockAlign
 	for {
 		data, err := source.ReadNext()
 		if err != nil {
 			done <- 1
 			return
 		}
-
-		dataBuf <- data
+		for len(data) > 0 {
+			dataBuf <- data[:frameSize]
+			data = data[frameSize:]
+		}
 	}
 
 }

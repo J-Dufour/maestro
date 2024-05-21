@@ -48,7 +48,8 @@ const (
 	MF_VERSION_API = 0x0070
 	MF_VERSION     = (MF_SDK_VERSION << 16) | MF_VERSION_API
 
-	MF_SOURCE_READER_ANY_STREAM = 0xFFFFFFFE
+	MF_SOURCE_READER_ANY_STREAM         = 0xFFFFFFFE
+	MF_SOURCE_READER_FIRST_AUDIO_STREAM = 0xFFFFFFFD
 
 	MFSTARTUP_FULL = uint32(0)
 )
@@ -160,6 +161,19 @@ func (s MFSourceReader) SetWaveFormat(w *WaveFormatExtensible) (err error) {
 	}
 
 	return nil
+}
+
+func (s MFSourceReader) GetWaveFormat() (w *WaveFormatExtensible, err error) {
+	var mediaTypePtr **MFMediaTypeVtbl
+	r1, _, _ := syscall.SyscallN(s.vtbl.GetCurrentMediaType, s.ptr, uintptr(MF_SOURCE_READER_FIRST_AUDIO_STREAM), uintptr(unsafe.Pointer(&mediaTypePtr)))
+	if uint32(r1) != uint32(windows.S_OK) {
+		return nil, errors.New("could not get wave format")
+	}
+
+	mediaType := &MFMediaType{ptr: uintptr(unsafe.Pointer(mediaTypePtr)), vtbl: *mediaTypePtr}
+
+	return getWaveFormatFromMediaType(mediaType)
+
 }
 
 type MFSample struct {
