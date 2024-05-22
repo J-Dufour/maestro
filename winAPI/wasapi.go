@@ -1,4 +1,4 @@
-package main
+package winAPI
 
 import (
 	"errors"
@@ -84,17 +84,17 @@ type MMDeviceEnumVtbl struct {
 }
 
 type WaveFormatExtensible struct {
-	wFormatTag      uint16
-	nChannels       uint16
-	nSamplesPerSec  uint32
-	nAvgBytesPerSec uint32
-	nBlockAlign     uint16
-	wBitsPerSample  uint16
-	cbSize          uint16
+	WFormatTag      uint16
+	NChannels       uint16
+	NSamplesPerSec  uint32
+	NAvgBytesPerSec uint32
+	NBlockAlign     uint16
+	WBitsPerSample  uint16
+	CbSize          uint16
 
-	reserved      uint16
-	dwChannelMask uint32
-	subFormat     windows.GUID
+	Reserved      uint16
+	DwChannelMask uint32
+	SubFormat     windows.GUID
 }
 
 func (a AudioClient) Initialize(sharemode int32, flags int32, refTime int64, period int64, waveFormat *WaveFormatExtensible) (err error) {
@@ -120,7 +120,7 @@ func (a AudioClient) IsFormatSupported(sharemode int32, format *WaveFormatExtens
 	return true, format, nil
 }
 
-func (a AudioClient) getMixFormat() (format *WaveFormatExtensible, err error) {
+func (a AudioClient) GetMixFormat() (format *WaveFormatExtensible, err error) {
 	r1, _, err := syscall.SyscallN(a.vtbl.getMixFormat, a.ptr, uintptr(unsafe.Pointer(&format)))
 	if uint32(r1) != uint32(windows.S_OK) {
 		err = errors.New("cannot get mix format")
