@@ -213,7 +213,7 @@ func sequencer(addSource chan *Reader, data chan []byte, skip chan int) {
 				waitingForNextTrack = false
 			}
 		case num := <-skip:
-			if num == 0 {
+			if num == 0 || idx >= len(queue) { //if skipping 0 songs, or if index is already waiting, skip
 				break
 			}
 			idx += num
