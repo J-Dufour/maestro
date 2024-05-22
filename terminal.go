@@ -117,6 +117,8 @@ type Window struct {
 	parent   *Window
 	children []*Window
 	Box
+
+	coms chan Com
 }
 
 func (win *Window) WithinBounds(box Box) bool {
@@ -141,7 +143,7 @@ func (win *Window) NewChild(box Box) (child *Window) {
 		}
 	}
 
-	child = &Window{win, []*Window{}, box}
+	child = &Window{win, []*Window{}, box, win.coms}
 	win.children = append(win.children, child)
 	return child
 }
@@ -171,7 +173,11 @@ func (win *Window) DrawBox(box Box, title string) Com {
 	return win.GetOffsetComBuilder().DrawBox(box, title).BuildCom()
 }
 
-func InitTerminalLoop(freq int, commands chan Com) (root *Window, loop func(), userInput chan byte) {
+func (win *Window) Exec(com Com) {
+	win.coms <- com
+}
+
+func InitTerminalLoop(freq int) (root *Window, loop func(), userInput chan byte) {
 	old, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		fmt.Println(err)
@@ -180,7 +186,9 @@ func InitTerminalLoop(freq int, commands chan Com) (root *Window, loop func(), u
 
 	//define root window
 	w, h := GetDimensions()
-	root = &Window{nil, []*Window{}, Box{1, 1, uint(w), uint(h)}}
+
+	commands := make(chan Com, 16)
+	root = &Window{nil, []*Window{}, Box{1, 1, uint(w), uint(h)}, commands}
 	userInput = make(chan byte)
 	return root, startTerminalLoop(freq, commands, userInput, old), userInput
 }

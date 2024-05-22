@@ -38,8 +38,7 @@ func main() {
 	player.Start()
 
 	// start UI
-	comChan := make(chan Com, 3)
-	root, initLoop, input := InitTerminalLoop(20, comChan)
+	root, initLoop, input := InitTerminalLoop(20)
 
 	// start input interpreter
 	go inputDecoder(input, player)
@@ -53,13 +52,13 @@ func main() {
 	}
 	queueWin := root.NewChild(Box{0, 0, uint(7 + maxLength), uint(4 + len(os.Args[1:]))})
 
-	comChan <- queueWin.DrawBox(Box{0, 0, queueWin.w, queueWin.h}, " Queue ")
+	queueWin.Exec(queueWin.DrawBox(Box{0, 0, queueWin.w, queueWin.h}, " Queue "))
 	listCom := queueWin.GetOffsetComBuilder().Offset(1, 1)
 	for i, name := range os.Args[1:] {
 		listCom.MoveLines(1).Offset(2, 0).Write(i+1, ". ", name)
 	}
 
-	comChan <- listCom.BuildCom()
+	queueWin.Exec(listCom.BuildCom())
 
 	initLoop()
 }
