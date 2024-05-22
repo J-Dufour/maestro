@@ -19,6 +19,17 @@ const (
 	BOX_S_BR = '┘'
 )
 
+type Box struct {
+	x uint
+	y uint
+	w uint
+	h uint
+}
+
+func boxesCollide(box1 Box, box2 Box) bool {
+	return !(box2.x+box2.w <= box1.x || box1.x+box1.w <= box2.x || box2.y+box2.h <= box1.y || box1.y+box1.h <= box2.y)
+}
+
 type Com string
 type ComBuilder struct {
 	offX    uint
@@ -86,13 +97,6 @@ func (cb *ComBuilder) BuildCom() Com {
 	return Com(cb.builder.String())
 }
 
-type Box struct {
-	x uint
-	y uint
-	w uint
-	h uint
-}
-
 func (cb *ComBuilder) DrawBox(box Box, title string) *ComBuilder {
 	//ensure width fits title
 	if len(title) > int(box.w)-2 || box.h < 2 {
@@ -113,6 +117,58 @@ type Window struct {
 	parent   *Window
 	children []*Window
 	Box
+}
+
+func (win *Window) WithinBounds(box Box) bool {
+	//check if top left corner is within bounds
+	inTopL := box.x < win.w && box.y < win.h
+	//check if bottom right corner is within bounds
+	inBotR := box.x+box.w <= win.w && box.y+box.h <= win.h
+
+	return inTopL && inBotR
+
+}
+
+func (win *Window) NewChild(box Box) (child *Window) {
+	if !win.WithinBounds(box) {
+		return nil
+	}
+
+	//check if collides
+	for _, child := range win.children {
+		if boxesCollide(box, child.Box) {
+			return nil
+		}
+	}
+
+	child = &Window{win, []*Window{}, box}
+	win.children = append(win.children, child)
+	return child
+}
+
+func (win *Window) GetOffsetComBuilder() *ComBuilder {
+	var cb *ComBuilder
+	if win.parent != nil {
+		cb = win.parent.GetOffsetComBuilder()
+		//permanent offset for dealing with relative coordinates
+		cb.offX += win.x
+		cb.offY += win.y
+		//starting offset
+		cb.Offset(int(win.x), int(win.x))
+	} else {
+		cb = &ComBuilder{0, 0, &strings.Builder{}}
+		cb.MoveTo(0, 0)
+	}
+
+	return cb
+}
+
+func (win *Window) DrawBox(box Box, title string) Com {
+	if !win.WithinBounds(box) {
+		return ""
+	}
+
+	return win.GetOffsetComBuilder().DrawBox(box, title).BuildCom()
 }
 
 func InitTerminalLoop(freq int, commands chan Com) (root *Window, loop func(), userInput chan byte) {
@@ -175,62 +231,6 @@ func inputLoop(input chan byte) {
 			input <- char[0]
 		}
 	}
-}
-
-func (win *Window) WithinBounds(box Box) bool {
-	//check if top left corner is within bounds
-	inTopL := box.x < win.w && box.y < win.h
-	//check if bottom right corner is within bounds
-	inBotR := box.x+box.w <= win.w && box.y+box.h <= win.h
-
-	return inTopL && inBotR
-
-}
-
-func boxesCollide(box1 Box, box2 Box) bool {
-	return !(box2.x+box2.w <= box1.x || box1.x+box1.w <= box2.x || box2.y+box2.h <= box1.y || box1.y+box1.h <= box2.y)
-}
-
-func (win *Window) NewChild(box Box) (child *Window) {
-	if !win.WithinBounds(box) {
-		return nil
-	}
-
-	//check if collides
-	for _, child := range win.children {
-		if boxesCollide(box, child.Box) {
-			return nil
-		}
-	}
-
-	child = &Window{win, []*Window{}, box}
-	win.children = append(win.children, child)
-	return child
-}
-
-func (win *Window) GetOffsetComBuilder() *ComBuilder {
-	var cb *ComBuilder
-	if win.parent != nil {
-		cb = win.parent.GetOffsetComBuilder()
-		//permanent offset for dealing with relative coordinates
-		cb.offX += win.x
-		cb.offY += win.y
-		//starting offset
-		cb.Offset(int(win.x), int(win.x))
-	} else {
-		cb = &ComBuilder{0, 0, &strings.Builder{}}
-		cb.MoveTo(0, 0)
-	}
-
-	return cb
-}
-
-func (win *Window) DrawBox(box Box, title string) Com {
-	if !win.WithinBounds(box) {
-		return ""
-	}
-
-	return win.GetOffsetComBuilder().DrawBox(box, title).BuildCom()
 }
 
 func GetDimensions() (w int, h int) {
