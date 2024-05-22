@@ -17,34 +17,35 @@ type SoundSource interface {
 
 type Player struct {
 	client *AudioClient
+	format *WaveFormatExtensible
 
-	data    chan []byte
-	control chan int
+	playerData  chan []byte
+	clearPlayer chan int
 
-	queueTail chan int
+	skip chan int
 
-	Done chan int
+	queue chan *Reader
 }
 
 func NewPlayer(sources ...SoundSource) (player *Player, err error) {
 	player = &Player{}
-	player.data = make(chan []byte)
-	player.control = make(chan int)
-	player.queueTail = make(chan int, 1)
-	player.queueTail <- 1
-	player.Done = make(chan int)
+
+	player.playerData = make(chan []byte)
+	player.clearPlayer = make(chan int)
+	player.skip = make(chan int)
+	player.queue = make(chan *Reader, 2)
 
 	// make player thread
 	client, format, err := initDefaultClient()
 	player.client = client
+	player.format = format
 	if err != nil {
 		return nil, err
 	}
-	go musicPlayer(player.client, format, player.data, player.control, player.Done)
-
+	go musicPlayer(player.client, format, player.playerData, player.clearPlayer)
+	go sequencer(player.queue, player.playerData, player.skip)
 	// add sources to queue
 	for _, source := range sources {
-		source.SetWaveFormat(format)
 		player.AddSourceToQueue(source)
 	}
 
@@ -59,10 +60,29 @@ func (p *Player) Stop() {
 	p.client.Stop()
 }
 
+func (p *Player) Skip() {
+	p.skip <- 1
+	p.clearPlayer <- 1
+}
+
 func (p *Player) AddSourceToQueue(s SoundSource) {
-	newTail := make(chan int)
-	go musicReader(s, p.data, p.queueTail, newTail)
-	p.queueTail = newTail
+	reader := NewReader(s)
+	reader.SetWaveFormat(p.format)
+	p.queue <- reader
+}
+
+type Reader struct {
+	source SoundSource
+}
+
+func NewReader(s SoundSource) (reader *Reader) {
+	reader = &Reader{}
+	reader.source = s
+	return reader
+}
+
+func (r *Reader) SetWaveFormat(wav *WaveFormatExtensible) {
+	r.source.SetWaveFormat(wav)
 }
 
 func main() {
@@ -103,13 +123,16 @@ func main() {
 		return
 	}
 
-	//start UI
-	comChan := make(chan Com, 3)
-	root, initLoop := InitTerminalLoop(20, comChan)
-
 	player.Start()
 
-	//make static queue view
+	// start UI
+	comChan := make(chan Com, 3)
+	root, initLoop, input := InitTerminalLoop(20, comChan)
+
+	// start input interpreter
+	go inputDecoder(input, player)
+
+	// make static queue view
 	maxLength := len(os.Args[1])
 	for _, arg := range os.Args[2:] {
 		if maxLength < len(arg) {
@@ -127,6 +150,16 @@ func main() {
 	comChan <- listCom.BuildCom()
 
 	initLoop()
+}
+
+func inputDecoder(input chan byte, player *Player) {
+	for key := range input {
+		switch key {
+		case 'k':
+			player.Skip()
+		default:
+		}
+	}
 }
 
 func initDefaultClient() (client *AudioClient, format *WaveFormatExtensible, err error) {
@@ -179,7 +212,7 @@ func (s MFSourceReader) ReadNext() (data []byte, err error) {
 	return data, nil
 }
 
-func musicPlayer(client *AudioClient, format *WaveFormatExtensible, dataBuf chan []byte, control chan int, done chan int) (err error) {
+func musicPlayer(client *AudioClient, format *WaveFormatExtensible, data chan []byte, clear chan int) (err error) {
 	// get render client
 	renderClient, err := client.GetRenderClient()
 	if err != nil {
@@ -194,19 +227,20 @@ func musicPlayer(client *AudioClient, format *WaveFormatExtensible, dataBuf chan
 		return
 	}
 
-	//get frame size
+	// get frame size
 	frameSize := int(format.nBlockAlign)
 
 	// create clock
 	clock := time.NewTicker(100 * time.Millisecond)
 
-	dataChanClosed := false
-	for !dataChanClosed {
+	//
+
+	for {
 		select {
-		case op := <-control:
-			if op == 0 {
-				break
-			}
+		case <-clear:
+			client.Stop()
+			client.Reset()
+			client.Start()
 		case <-clock.C:
 			// Get buffer
 			padding, err := client.GetCurrentPadding()
@@ -233,12 +267,8 @@ func musicPlayer(client *AudioClient, format *WaveFormatExtensible, dataBuf chan
 			dataAvailable := true
 			for i < int(freeFrames) && dataAvailable {
 				select {
-				case frame, open := <-dataBuf:
-					dataChanClosed = !open
+				case frame := <-data:
 					total += copy(acc[i*frameSize:], frame)
-					if dataChanClosed {
-						dataAvailable = false
-					}
 				case <-time.After(time.Millisecond):
 					acc = acc[:total]
 					dataAvailable = false
@@ -257,33 +287,81 @@ func musicPlayer(client *AudioClient, format *WaveFormatExtensible, dataBuf chan
 			}
 		}
 	}
-
-	// get remaining buffer and wait until end
-	padding, err := client.GetCurrentPadding()
-	if err != nil {
-		//if somehow fails, just assume the buffer is full
-		padding = bufferFrames
-	}
-
-	time.Sleep(time.Duration(padding*uint32(frameSize)/(format.nAvgBytesPerSec)) * time.Second)
-	done <- 1
-	return nil
 }
 
-func musicReader(source SoundSource, dataBuf chan []byte, start chan int, done chan int) {
-	<-start
+func sequencer(addSource chan *Reader, data chan []byte, skip chan int) {
+	waitingForNextTrack := true
+	queue := make([]*Reader, 0)
+	idx := 0
+
+	clearChan := make(chan int)
+	quitChan := make(chan int)
+	for {
+		select {
+		case reader := <-addSource:
+			queue = append(queue, reader)
+			if waitingForNextTrack {
+				fmt.Println(queue)
+				//play song
+				go musicReader(queue[idx].source, data, clearChan, quitChan, skip)
+				waitingForNextTrack = false
+			}
+		case num := <-skip:
+			if num == 0 {
+				break
+			}
+			idx += num
+			idx = Clamp(idx, 0, len(queue))
+			if idx < len(queue) {
+				waitingForNextTrack = false
+				//interrupt current song
+				quitChan <- 1
+				//play song
+				go musicReader(queue[idx].source, data, clearChan, quitChan, skip)
+
+			} else {
+				//interrupt current song
+				quitChan <- 1
+				waitingForNextTrack = true
+			}
+
+		}
+	}
+}
+
+func musicReader(source SoundSource, dataBuf chan []byte, clear chan int, quit chan int, done chan int) {
 	format, _ := source.GetWaveFormat()
 	frameSize := format.nBlockAlign
+	keepLoading := true
 	for {
 		data, err := source.ReadNext()
 		if err != nil {
 			done <- 1
+			<-quit
 			return
 		}
-		for len(data) > 0 {
-			dataBuf <- data[:frameSize]
-			data = data[frameSize:]
+		keepLoading = true
+		for len(data) > 0 && keepLoading {
+			select {
+			case <-clear:
+				keepLoading = false
+			case <-quit:
+				return
+			case dataBuf <- data[:frameSize]:
+
+				data = data[frameSize:]
+			}
 		}
 	}
 
+}
+
+func Clamp(x int, min int, max int) int {
+	if x < min {
+		x = min
+	} else if x > max {
+		x = max
+	}
+
+	return x
 }

@@ -115,7 +115,7 @@ type Window struct {
 	Box
 }
 
-func InitTerminalLoop(freq int, commands chan Com) (root *Window, loop func()) {
+func InitTerminalLoop(freq int, commands chan Com) (root *Window, loop func(), userInput chan byte) {
 	old, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		fmt.Println(err)
@@ -125,11 +125,11 @@ func InitTerminalLoop(freq int, commands chan Com) (root *Window, loop func()) {
 	//define root window
 	w, h := GetDimensions()
 	root = &Window{nil, []*Window{}, Box{1, 1, uint(w), uint(h)}}
-
-	return root, startTerminalLoop(freq, commands, old)
+	userInput = make(chan byte)
+	return root, startTerminalLoop(freq, commands, userInput, old), userInput
 }
 
-func startTerminalLoop(freq int, commands chan Com, oldState *term.State) func() {
+func startTerminalLoop(freq int, commands chan Com, userIn chan byte, oldState *term.State) func() {
 	return func() {
 		defer endTerminalLoop(oldState)
 		clock := time.NewTicker(time.Second / time.Duration(freq))
@@ -147,6 +147,8 @@ func startTerminalLoop(freq int, commands chan Com, oldState *term.State) func()
 			case in := <-inChan:
 				if in == 'q' {
 					return
+				} else {
+					userIn <- in
 				}
 			}
 

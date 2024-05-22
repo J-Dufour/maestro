@@ -178,6 +178,15 @@ func (a AudioClient) Stop() (err error) {
 	return nil
 }
 
+func (a AudioClient) Reset() (err error) {
+	r1, _, err := syscall.SyscallN(a.vtbl.reset, a.ptr)
+	if uint32(r1) != uint32(windows.S_OK) {
+		err = errors.New("could not reset")
+		return err
+	}
+	return nil
+}
+
 func (a AudioRenderClient) GetBuffer(frames uint32) (buffStart *byte, err error) {
 	r1, _, err := syscall.SyscallN(a.vtbl.getBuffer, a.ptr, uintptr(frames), uintptr(unsafe.Pointer(&buffStart)))
 	if uint32(r1) != uint32(windows.S_OK) {
