@@ -1,56 +1,46 @@
 package audio
 
 import (
-	"fmt"
 	"time"
-	"unsafe"
-
-	win32 "github.com/J-Dufour/maestro/winAPI"
-	"golang.org/x/sys/windows"
 )
 
-func InitializeAudioAPI() error {
-	err := windows.CoInitializeEx(0, windows.COINIT_APARTMENTTHREADED)
-	if err != nil {
-		return err
-	}
+const (
+	PCM_TYPE_INT   = iota
+	PCM_TYPE_FLOAT = iota
+)
 
-	err = win32.StartMediaFoundation()
-	if err != nil {
-
-		return err
-	}
-
-	return nil
+type PCMWaveFormat struct {
+	NumChannels uint16
+	SampleRate  uint32
+	SampleDepth uint16
+	PCMType     uint32
 }
 
-func initDefaultClient() (client *win32.AudioClient, format *win32.WaveFormatExtensible, err error) {
-	client, err = win32.GetDefaultClient()
-	if err != nil {
-		return nil, nil, err
-	}
+type AudioClient interface {
+	GetPCMWaveFormat() *PCMWaveFormat
 
-	// get format
-	format, err = client.GetMixFormat()
-	if err != nil {
-		return nil, nil, err
-	}
+	GetBufferSize() (int, error)
+	GetBufferPadding() (int, error)
+	LoadToBuffer([]byte) (int, error)
+	ClearBuffer() error
 
-	sharemode := int32(0)
-	flags := int32(0)
-	hnsBufDuration := int64(100 * 1e6) // 100 ms
-	period := 0
-	err = client.Initialize(sharemode, flags, hnsBufDuration, int64(period), format)
-	if err != nil {
-		return nil, nil, err
-	}
+	Start() error
+	Stop() (bool, error)
+}
 
-	return client, format, nil
+type AudioSource interface {
+	ReadNext() ([]byte, error)
+	SetPCMWaveFormat(*PCMWaveFormat) error
+	GetPCMWaveFormat() (*PCMWaveFormat, error)
+}
+
+type AudioSourceProvider struct {
+	GetAudioSourceFromFile func(filepath string) (AudioSource, error)
 }
 
 type Player struct {
-	client *win32.AudioClient
-	format *win32.WaveFormatExtensible
+	client AudioClient
+	format *PCMWaveFormat
 
 	playerData  chan []byte
 	clearPlayer chan int
@@ -60,7 +50,15 @@ type Player struct {
 	queue chan *Reader
 }
 
-func NewPlayer(sources ...SoundSource) (player *Player, err error) {
+func getDefaultClient() (AudioClient, error) {
+	return getDefaultWindowsClient()
+}
+
+func GetAudioSourceProvider() *AudioSourceProvider {
+	return getWinAudioSourceProvider()
+}
+
+func NewPlayer(sources ...AudioSource) (player *Player, err error) {
 	player = &Player{}
 
 	player.playerData = make(chan []byte)
@@ -69,13 +67,13 @@ func NewPlayer(sources ...SoundSource) (player *Player, err error) {
 	player.queue = make(chan *Reader, 2)
 
 	// make player thread
-	client, format, err := initDefaultClient()
+	client, err := getDefaultClient()
 	player.client = client
-	player.format = format
+	player.format = client.GetPCMWaveFormat()
 	if err != nil {
 		return nil, err
 	}
-	go musicPlayer(player.client, format, player.playerData, player.clearPlayer)
+	go musicPlayer(player.client, player.playerData, player.clearPlayer)
 	go sequencer(player.queue, player.playerData, player.skip)
 	// add sources to queue
 	for _, source := range sources {
@@ -98,43 +96,37 @@ func (p *Player) Skip() {
 	p.clearPlayer <- 1
 }
 
-func (p *Player) AddSourceToQueue(s SoundSource) {
+func (p *Player) AddSourceToQueue(s AudioSource) {
 	reader := NewReader(s)
 	reader.SetWaveFormat(p.format)
 	p.queue <- reader
 }
 
 type Reader struct {
-	source SoundSource
+	source AudioSource
 }
 
-func NewReader(s SoundSource) (reader *Reader) {
+func NewReader(s AudioSource) (reader *Reader) {
 	reader = &Reader{}
 	reader.source = s
 	return reader
 }
 
-func (r *Reader) SetWaveFormat(wav *win32.WaveFormatExtensible) {
-	r.source.SetWaveFormat(wav)
+func (r *Reader) SetWaveFormat(wav *PCMWaveFormat) error {
+	return r.source.SetPCMWaveFormat(wav)
 }
 
-func musicPlayer(client *win32.AudioClient, format *win32.WaveFormatExtensible, data chan []byte, clear chan int) (err error) {
-	// get render client
-	renderClient, err := client.GetRenderClient()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+func musicPlayer(client AudioClient, data chan []byte, clear chan int) {
+	format := client.GetPCMWaveFormat()
 
 	// get max buffer size
 	bufferFrames, err := client.GetBufferSize()
 	if err != nil {
-		fmt.Println(err)
-		return
+		panic(err)
 	}
 
 	// get frame size
-	frameSize := int(format.NBlockAlign)
+	frameSize := int(format.NumChannels * format.SampleDepth / 8)
 
 	// create clock
 	clock := time.NewTicker(100 * time.Millisecond)
@@ -144,34 +136,23 @@ func musicPlayer(client *win32.AudioClient, format *win32.WaveFormatExtensible, 
 	for {
 		select {
 		case <-clear:
-			client.Stop()
-			client.Reset()
-			client.Start()
+			client.ClearBuffer()
 		case <-clock.C:
 			// Get buffer
-			padding, err := client.GetCurrentPadding()
+			padding, err := client.GetBufferPadding()
 			if err != nil {
-				fmt.Println(err)
-				return nil
+				panic(err)
 			}
-
 			freeFrames := bufferFrames - padding
 
-			buff, err := renderClient.GetBuffer(freeFrames)
-			if err != nil {
-				fmt.Println(err)
-				return nil
-			}
-
-			// initialize buffer
-			freeData := freeFrames * uint32(frameSize)
-			acc := make([]byte, freeData)
+			// initialize accumulator
+			acc := make([]byte, freeFrames*frameSize)
 
 			// load until full or nothing in channel
 			total := 0
-			i := 0
+
 			dataAvailable := true
-			for i < int(freeFrames) && dataAvailable {
+			for i := 0; i < int(freeFrames) && dataAvailable; i++ {
 				select {
 				case frame := <-data:
 					total += copy(acc[i*frameSize:], frame)
@@ -179,18 +160,11 @@ func musicPlayer(client *win32.AudioClient, format *win32.WaveFormatExtensible, 
 					acc = acc[:total]
 					dataAvailable = false
 				}
-				i++
 			}
 
-			// copy accumulated data into real buffer
-			copy(unsafe.Slice(buff, len(acc)), acc)
+			//load into buffer
+			client.LoadToBuffer(acc)
 
-			// release buffer
-			err = renderClient.ReleaseBuffer(uint32(len(acc) / frameSize))
-			if err != nil {
-				fmt.Println(err)
-				return nil
-			}
 		}
 	}
 }
@@ -207,7 +181,6 @@ func sequencer(addSource chan *Reader, data chan []byte, skip chan int) {
 		case reader := <-addSource:
 			queue = append(queue, reader)
 			if waitingForNextTrack {
-				fmt.Println(queue)
 				//play song
 				go musicReader(queue[idx].source, data, clearChan, quitChan, skip)
 				waitingForNextTrack = false
@@ -235,9 +208,9 @@ func sequencer(addSource chan *Reader, data chan []byte, skip chan int) {
 	}
 }
 
-func musicReader(source SoundSource, dataBuf chan []byte, clear chan int, quit chan int, done chan int) {
-	format, _ := source.GetWaveFormat()
-	frameSize := format.NBlockAlign
+func musicReader(source AudioSource, dataBuf chan []byte, clear chan int, quit chan int, done chan int) {
+	format, _ := source.GetPCMWaveFormat()
+	frameSize := format.NumChannels * format.SampleDepth / 8
 	keepLoading := true
 	for {
 		data, err := source.ReadNext()

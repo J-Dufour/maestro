@@ -2,7 +2,6 @@ package winAPI
 
 import (
 	"errors"
-	"fmt"
 	"runtime"
 	"syscall"
 	"unsafe"
@@ -16,10 +15,22 @@ var (
 	MMDeviceEnumRefID      = windows.GUID{Data1: 0xA95664D2, Data2: 0x9614, Data3: 0x4F35, Data4: [8]byte{0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6}}
 	AudioClientRefID       = windows.GUID{Data1: 0x1CB9AD4C, Data2: 0xDBFA, Data3: 0x4c32, Data4: [8]byte{0xB1, 0x78, 0xC2, 0xF5, 0x68, 0xA7, 0x03, 0xB2}}
 	AudioRenderClientRefID = windows.GUID{Data1: 0xF294ACFC, Data2: 0x3146, Data3: 0x4483, Data4: [8]byte{0xA7, 0xBF, 0xAD, 0xDC, 0xA7, 0xC2, 0x60, 0xE2}}
+
+	KSDATAFORMAT_SUBTYPE_PCM        = windows.GUID{Data1: 0x00000001, Data2: 0x0000, Data3: 0x0010, Data4: [8]byte{0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}}
+	KSDATAFORMAT_SUBTYPE_IEEE_FLOAT = windows.GUID{Data1: 0x00000003, Data2: 0x0000, Data3: 0x0010, Data4: [8]byte{0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}}
 )
 var (
 	ole32        = windows.NewLazyDLL("ole32.dll")
 	coCreateInst = ole32.NewProc("CoCreateInstance")
+)
+
+const (
+	WAVE_FORMAT_EXTENSIBLE = 0xFFFE
+	WAVE_FORMAT_PCM        = 0x1
+
+	SPEAKER_FRONT_LEFT   = 0x1
+	SPEAKER_FRONT_RIGHT  = 0x2
+	SPEAKER_FRONT_CENTER = 0x4
 )
 
 type AudioRenderClient struct {
@@ -169,13 +180,16 @@ func (a AudioClient) Start() (err error) {
 	return nil
 }
 
-func (a AudioClient) Stop() (err error) {
+func (a AudioClient) Stop() (wasPlaying bool, err error) {
 	r1, _, err := syscall.SyscallN(a.vtbl.stop, a.ptr)
-	if uint32(r1) != uint32(windows.S_OK) {
+
+	if uint32(r1) == uint32(windows.S_FALSE) {
+		return false, nil
+	} else if uint32(r1) != uint32(windows.S_OK) {
 		err = errors.New("could not stop")
-		return err
+		return false, err
 	}
-	return nil
+	return true, nil
 }
 
 func (a AudioClient) Reset() (err error) {
@@ -233,7 +247,6 @@ func GetDefaultClient() (client *AudioClient, err error) {
 	// get AudioClient
 	r1, _, _ = syscall.SyscallN(device.activate, uintptr(unsafe.Pointer(MMDevicePtr)), uintptr(unsafe.Pointer(&AudioClientRefID)), 0x000000017, 0, uintptr(unsafe.Pointer(&clientPtr)))
 	if uint32(r1) != uint32(windows.S_OK) {
-		fmt.Println(r1)
 		err = errors.New("cannot instantiate audio client")
 		return nil, err
 	}

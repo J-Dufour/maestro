@@ -63,7 +63,7 @@ func StartMediaFoundation() (err error) {
 	return nil
 }
 
-func GetSourceReaderFromFile(path string) (reader *MFSourceReader, err error) {
+func CreateSourceReaderFromFile(path string) (reader *MFSourceReader, err error) {
 	var ReaderPtr **MFSourceReaderVtbl
 
 	path += "\x00" // null terminate
@@ -174,32 +174,6 @@ func (s MFSourceReader) GetWaveFormat() (w *WaveFormatExtensible, err error) {
 
 	return getWaveFormatFromMediaType(mediaType)
 
-}
-
-func (s MFSourceReader) ReadNext() (data []byte, err error) {
-	//get sample
-	_, _, _, sample, err := s.ReadSample(MF_SOURCE_READER_ANY_STREAM, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	//get buffer
-	buffer, err := sample.ConvertToContiguousBuffer()
-	if err != nil {
-		return nil, err
-	}
-
-	//return slice
-	buffPtr, _, length, err := buffer.Lock()
-	if err != nil {
-		return nil, err
-	}
-
-	data = make([]byte, length)
-	copy(data, unsafe.Slice(buffPtr, length))
-
-	buffer.Unlock()
-	return data, nil
 }
 
 type MFSample struct {

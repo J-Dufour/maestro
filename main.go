@@ -17,10 +17,11 @@ func main() {
 		fmt.Println("please provide path to valid music file")
 		return
 	}
+	sourceProvider := audio.GetAudioSourceProvider()
 
-	sources := make([]audio.SoundSource, 0)
+	sources := make([]audio.AudioSource, 0)
 	for _, fileName := range os.Args[1:] {
-		source, err := audio.GetSoundSourceFromFile(fileName)
+		source, err := sourceProvider.GetAudioSourceFromFile(fileName)
 		if err != nil {
 			fmt.Println(err)
 			return
