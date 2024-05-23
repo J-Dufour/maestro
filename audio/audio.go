@@ -92,8 +92,9 @@ func (p *Player) Stop() {
 }
 
 func (p *Player) Skip() {
-	p.skip <- 1
 	p.clearPlayer <- 1
+	p.skip <- 1
+
 }
 
 func (p *Player) AddSourceToQueue(s AudioSource) {
