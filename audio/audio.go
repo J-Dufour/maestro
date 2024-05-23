@@ -47,7 +47,7 @@ type Player struct {
 
 	skip chan int
 
-	queue chan *Reader
+	queue chan AudioSource
 }
 
 func getDefaultClient() (AudioClient, error) {
@@ -64,7 +64,7 @@ func NewPlayer(sources ...AudioSource) (player *Player, err error) {
 	player.playerData = make(chan []byte)
 	player.clearPlayer = make(chan int)
 	player.skip = make(chan int)
-	player.queue = make(chan *Reader, 2)
+	player.queue = make(chan AudioSource, 2)
 
 	// make player thread
 	client, err := getDefaultClient()
@@ -98,23 +98,8 @@ func (p *Player) Skip() {
 }
 
 func (p *Player) AddSourceToQueue(s AudioSource) {
-	reader := NewReader(s)
-	reader.SetWaveFormat(p.format)
-	p.queue <- reader
-}
-
-type Reader struct {
-	source AudioSource
-}
-
-func NewReader(s AudioSource) (reader *Reader) {
-	reader = &Reader{}
-	reader.source = s
-	return reader
-}
-
-func (r *Reader) SetWaveFormat(wav *PCMWaveFormat) error {
-	return r.source.SetPCMWaveFormat(wav)
+	s.SetPCMWaveFormat(p.format)
+	p.queue <- s
 }
 
 func musicPlayer(client AudioClient, data chan []byte, clear chan int) {
@@ -170,9 +155,9 @@ func musicPlayer(client AudioClient, data chan []byte, clear chan int) {
 	}
 }
 
-func sequencer(addSource chan *Reader, data chan []byte, skip chan int) {
+func sequencer(addSource chan AudioSource, data chan []byte, skip chan int) {
 	waitingForNextTrack := true
-	queue := make([]*Reader, 0)
+	queue := make([]AudioSource, 0)
 	idx := 0
 
 	clearChan := make(chan int)
@@ -183,7 +168,7 @@ func sequencer(addSource chan *Reader, data chan []byte, skip chan int) {
 			queue = append(queue, reader)
 			if waitingForNextTrack {
 				//play song
-				go musicReader(queue[idx].source, data, clearChan, quitChan, skip)
+				go musicReader(queue[idx], data, clearChan, quitChan, skip)
 				waitingForNextTrack = false
 			}
 		case num := <-skip:
@@ -197,7 +182,7 @@ func sequencer(addSource chan *Reader, data chan []byte, skip chan int) {
 				//interrupt current song
 				quitChan <- 1
 				//play song
-				go musicReader(queue[idx].source, data, clearChan, quitChan, skip)
+				go musicReader(queue[idx], data, clearChan, quitChan, skip)
 
 			} else {
 				//interrupt current song
