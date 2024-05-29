@@ -1,6 +1,8 @@
 package audio
 
 import (
+	"slices"
+	"unicode/utf16"
 	"unsafe"
 
 	win32 "github.com/J-Dufour/maestro/winAPI"
@@ -105,12 +107,64 @@ func createWinAudioSourceFromFile(path string) (AudioSource, error) {
 	if err != nil {
 		return nil, err
 	}
+	metadata := NewMetadata()
+	metadata.Filepath = path
+	// grab metadata
 
-	return &WinAudioSource{sourceReader}, nil
+	// get media source
+	mediaSource, err := sourceReader.GetMediaSource()
+	if err != nil {
+		return nil, err
+	}
+
+	// get metadata provider
+	propStore, err := mediaSource.GetPropertyStore()
+	if err != nil {
+		return &WinAudioSource{metadata, sourceReader}, nil
+	}
+
+	// get metadata
+	title, err := propStore.GetValue(&win32.PKEY_Title)
+	if err == nil {
+		metadata.Title = decodeValue(title).(string)
+	}
+
+	artist, err := propStore.GetValue(&win32.PKEY_Music_Artist)
+	if err == nil {
+		metadata.Artist = decodeValue(artist).(string)
+	}
+
+	return &WinAudioSource{metadata, sourceReader}, nil
+}
+
+func decodeValue(val win32.PropVariant) any {
+	switch val.PropType {
+	case win32.VT_BOOL:
+		return val.Data == 0xFFFFFFFF
+	case win32.VT_UI4:
+		return uint32(val.Data)
+	case win32.VT_UI8:
+		return val.Data
+	case win32.VT_LPWSTR:
+		return getNullUTF16String((*uint16)(unsafe.Pointer(uintptr(val.Data))))
+	default:
+		return nil
+	}
+}
+
+func getNullUTF16String(ptr *uint16) string {
+	var str []uint16
+	idx := -1
+	for i := 1; idx == -1; i++ {
+		str = unsafe.Slice(ptr, 32*i)
+		idx = slices.Index[[]uint16](str, 0)
+	}
+	return string(utf16.Decode(str[:idx]))
 }
 
 type WinAudioSource struct {
-	reader *win32.MFSourceReader
+	metadata *Metadata
+	reader   *win32.MFSourceReader
 }
 
 func (winSource *WinAudioSource) ReadNext() (data []byte, err error) {
@@ -149,6 +203,10 @@ func (winSource *WinAudioSource) GetPCMWaveFormat() (wav *PCMWaveFormat, err err
 
 func (winSource *WinAudioSource) SetPCMWaveFormat(wav *PCMWaveFormat) (err error) {
 	return winSource.reader.SetWaveFormat(PCMWaveFormatToWaveFormatEx(wav))
+}
+
+func (winSource *WinAudioSource) GetMetadata() Metadata {
+	return *winSource.metadata
 }
 
 type WinAudioClient struct {

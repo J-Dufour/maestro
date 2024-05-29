@@ -9,11 +9,30 @@ const (
 	PCM_TYPE_FLOAT = iota
 )
 
+const (
+	NOT_FOUND = "Unknown"
+)
+
 type PCMWaveFormat struct {
 	NumChannels uint16
 	SampleRate  uint32
 	SampleDepth uint16
 	PCMType     uint32
+}
+
+type Metadata struct {
+	Filepath string
+
+	Title  string
+	Artist string
+}
+
+func NewMetadata() (m *Metadata) {
+	m = &Metadata{}
+	m.Filepath = NOT_FOUND
+	m.Title = NOT_FOUND
+
+	return m
 }
 
 type AudioClient interface {
@@ -32,6 +51,8 @@ type AudioSource interface {
 	ReadNext() ([]byte, error)
 	SetPCMWaveFormat(*PCMWaveFormat) error
 	GetPCMWaveFormat() (*PCMWaveFormat, error)
+
+	GetMetadata() Metadata
 }
 
 type AudioSourceProvider struct {
