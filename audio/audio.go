@@ -1,12 +1,19 @@
 package audio
 
 import (
+	"io"
 	"time"
 )
 
 const (
-	PCM_TYPE_INT   = iota
-	PCM_TYPE_FLOAT = iota
+	CTL_PLAY = iota
+	CTL_PAUSE
+	CTL_SKIP
+)
+
+const (
+	PCM_TYPE_INT = iota
+	PCM_TYPE_FLOAT
 )
 
 const (
@@ -63,12 +70,9 @@ type Player struct {
 	client AudioClient
 	format *PCMWaveFormat
 
-	playerData  chan []byte
-	clearPlayer chan int
+	control chan int
 
-	skip chan int
-
-	queue chan AudioSource
+	queueIn chan AudioSource
 }
 
 func getDefaultClient() (AudioClient, error) {
@@ -82,10 +86,8 @@ func GetAudioSourceProvider() *AudioSourceProvider {
 func NewPlayer(sources ...AudioSource) (player *Player, err error) {
 	player = &Player{}
 
-	player.playerData = make(chan []byte)
-	player.clearPlayer = make(chan int)
-	player.skip = make(chan int)
-	player.queue = make(chan AudioSource, 2)
+	player.control = make(chan int, 16)
+	player.queueIn = make(chan AudioSource, 2)
 
 	// make player thread
 	client, err := getDefaultClient()
@@ -94,8 +96,8 @@ func NewPlayer(sources ...AudioSource) (player *Player, err error) {
 	if err != nil {
 		return nil, err
 	}
-	go musicPlayer(player.client, player.playerData, player.clearPlayer)
-	go sequencer(player.queue, player.playerData, player.skip)
+	go player.playerThread()
+
 	// add sources to queue
 	for _, source := range sources {
 		player.AddSourceToQueue(source)
@@ -105,26 +107,35 @@ func NewPlayer(sources ...AudioSource) (player *Player, err error) {
 }
 
 func (p *Player) Start() {
-	p.client.Start()
+	p.control <- CTL_PLAY
 }
 
 func (p *Player) Stop() {
-	p.client.Stop()
+	p.control <- CTL_PAUSE
 }
 
 func (p *Player) Skip() {
-	p.clearPlayer <- 1
-	p.skip <- 1
+	p.control <- CTL_SKIP
+	p.control <- 1
 
 }
 
 func (p *Player) AddSourceToQueue(s AudioSource) {
 	s.SetPCMWaveFormat(p.format)
-	p.queue <- s
+	p.queueIn <- s
 }
 
-func musicPlayer(client AudioClient, data chan []byte, clear chan int) {
+func (player *Player) playerThread() {
+	CLK_DUR := 100 * time.Millisecond
+
+	client := player.client
 	format := client.GetPCMWaveFormat()
+
+	//initialize audio queue
+	queue := make([]AudioSource, 0)
+	idx := 0
+	var curSource AudioSource
+	waitingForNextTrack := true
 
 	// get max buffer size
 	bufferFrames, err := client.GetBufferSize()
@@ -135,14 +146,54 @@ func musicPlayer(client AudioClient, data chan []byte, clear chan int) {
 	// get frame size
 	frameSize := int(format.NumChannels * format.SampleDepth / 8)
 
-	// create clock
-	clock := time.NewTicker(100 * time.Millisecond)
+	//initialize "leftover" buffer
+	leftover := make([]byte, 0)
 
+	// create clock
+	clock := time.NewTicker(CLK_DUR)
+	clock.Stop() // wait for first track
 	//
 
 	for {
 		select {
-		case <-clear:
+		case source := <-player.queueIn:
+			queue = append(queue, source)
+			if waitingForNextTrack {
+				curSource = queue[idx]
+				clock.Reset(CLK_DUR)
+				waitingForNextTrack = false
+			}
+		case op := <-player.control:
+			switch op {
+			case CTL_PLAY:
+				client.Start()
+			case CTL_PAUSE:
+				client.Stop()
+			case CTL_SKIP:
+				//grab exra data
+				amt := <-player.control
+
+				if amt == 0 || idx >= len(queue) { //if skipping 0 songs, or if index is already waiting, skip
+					break
+				}
+				idx += amt
+				idx = Clamp(idx, 0, len(queue))
+				if idx < len(queue) {
+					waitingForNextTrack = false
+
+					// interrupt current song
+					leftover = leftover[:0]
+					client.ClearBuffer()
+					// play next song
+					curSource = queue[idx]
+					clock.Reset(CLK_DUR)
+				} else {
+					// wait for next song
+					waitingForNextTrack = true
+					clock.Stop()
+				}
+
+			}
 			client.ClearBuffer()
 		case <-clock.C:
 			// Get buffer
@@ -155,91 +206,39 @@ func musicPlayer(client AudioClient, data chan []byte, clear chan int) {
 			// initialize accumulator
 			acc := make([]byte, freeFrames*frameSize)
 
-			// load until full or nothing in channel
-			total := 0
+			//load leftover
+			totalCopied := copy(acc, leftover)
+			leftover = leftover[totalCopied:]
 
-			dataAvailable := true
-			for i := 0; i < int(freeFrames) && dataAvailable; i++ {
-				select {
-				case frame := <-data:
-					total += copy(acc[i*frameSize:], frame)
-				case <-time.After(time.Millisecond):
-					acc = acc[:total]
-					dataAvailable = false
+			//load new data
+			for i := 0; totalCopied < freeFrames*frameSize; i++ {
+				frames, err := curSource.ReadNext()
+				if err == io.EOF {
+					// exit and move to next song
+					idx++
+					if idx < len(queue) {
+						curSource = queue[idx]
+					} else { //if no next song, wait.
+						waitingForNextTrack = true
+						clock.Stop()
+					}
+					break
+
+				} else if err != nil {
+					panic(err)
 				}
+				copied := copy(acc[totalCopied:], frames)
+				if copied < len(frames) {
+					leftover = frames[copied:]
+				}
+				totalCopied += copied
 			}
 
 			//load into buffer
-			client.LoadToBuffer(acc)
+			client.LoadToBuffer(acc[:totalCopied])
 
 		}
 	}
-}
-
-func sequencer(addSource chan AudioSource, data chan []byte, skip chan int) {
-	waitingForNextTrack := true
-	queue := make([]AudioSource, 0)
-	idx := 0
-
-	clearChan := make(chan int)
-	quitChan := make(chan int)
-	for {
-		select {
-		case reader := <-addSource:
-			queue = append(queue, reader)
-			if waitingForNextTrack {
-				//play song
-				go musicReader(queue[idx], data, clearChan, quitChan, skip)
-				waitingForNextTrack = false
-			}
-		case num := <-skip:
-			if num == 0 || idx >= len(queue) { //if skipping 0 songs, or if index is already waiting, skip
-				break
-			}
-			idx += num
-			idx = Clamp(idx, 0, len(queue))
-			if idx < len(queue) {
-				waitingForNextTrack = false
-				//interrupt current song
-				quitChan <- 1
-				//play song
-				go musicReader(queue[idx], data, clearChan, quitChan, skip)
-
-			} else {
-				//interrupt current song
-				quitChan <- 1
-				waitingForNextTrack = true
-			}
-
-		}
-	}
-}
-
-func musicReader(source AudioSource, dataBuf chan []byte, clear chan int, quit chan int, done chan int) {
-	format, _ := source.GetPCMWaveFormat()
-	frameSize := format.NumChannels * format.SampleDepth / 8
-	keepLoading := true
-	for {
-		data, err := source.ReadNext()
-		if err != nil {
-			done <- 1
-			<-quit
-			return
-		}
-		keepLoading = true
-		for len(data) > 0 && keepLoading {
-			select {
-			case <-clear:
-				keepLoading = false
-			case <-quit:
-				return
-			case dataBuf <- data[:frameSize]:
-
-				data = data[frameSize:]
-			}
-		}
-	}
-
 }
 
 func Clamp(x int, min int, max int) int {
