@@ -73,12 +73,12 @@ func main() {
 		sources = append(sources, source)
 	}
 
-	player, err := audio.NewPlayer(sources...)
+	player, err := audio.NewPlayer()
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-
+	player.AddSourcesToQueue(sources...)
 	player.Start()
 
 	// start UI

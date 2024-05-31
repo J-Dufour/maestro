@@ -83,7 +83,7 @@ func GetAudioSourceProvider() *AudioSourceProvider {
 	return getWinAudioSourceProvider()
 }
 
-func NewPlayer(sources ...AudioSource) (player *Player, err error) {
+func NewPlayer() (player *Player, err error) {
 	player = &Player{}
 
 	player.control = make(chan int, 16)
@@ -97,11 +97,6 @@ func NewPlayer(sources ...AudioSource) (player *Player, err error) {
 		return nil, err
 	}
 	go player.playerThread()
-
-	// add sources to queue
-	for _, source := range sources {
-		player.AddSourceToQueue(source)
-	}
 
 	return player, nil
 }
@@ -120,9 +115,11 @@ func (p *Player) Skip() {
 
 }
 
-func (p *Player) AddSourceToQueue(s AudioSource) {
-	s.SetPCMWaveFormat(p.format)
-	p.queueIn <- s
+func (p *Player) AddSourcesToQueue(sources ...AudioSource) {
+	for _, source := range sources {
+		source.SetPCMWaveFormat(p.format)
+		p.queueIn <- source
+	}
 }
 
 func (player *Player) playerThread() {
