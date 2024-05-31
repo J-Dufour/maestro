@@ -209,7 +209,7 @@ func startTerminalLoop(freq int, commands chan Com, userIn chan byte, oldState *
 			case command := <-commands:
 				fmt.Print(command)
 			case in := <-inChan:
-				if in == 'q' {
+				if in == KEY_QUIT {
 					return
 				} else {
 					userIn <- in
