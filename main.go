@@ -3,24 +3,62 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
 
 	"github.com/J-Dufour/maestro/audio"
 )
+
+var VALID_EXT = []string{".mp3", ".wav"}
 
 func main() {
 
 	// startup
 	audio.InitializeAudioAPI()
 
-	// get file reader
+	// get file names
 	if len(os.Args) < 2 {
-		fmt.Println("please provide path to valid music file")
+		fmt.Println("please provide path(s) to valid music file")
 		return
 	}
+
+	absolutePaths := make([]string, 0)
+	for _, arg := range os.Args[1:] {
+
+		// get absolute paths
+		path, err := filepath.Abs(arg)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		// if folder, find all files within
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			path += "/*"
+			subfiles, err := filepath.Glob(path)
+			if err == nil {
+				for _, subfile := range subfiles {
+					if slices.Contains[[]string](VALID_EXT, filepath.Ext(subfile)) {
+						if info, err := os.Stat(subfile); err == nil && !info.IsDir() {
+							absolutePaths = append(absolutePaths, subfile)
+						}
+					}
+				}
+			}
+		} else if err == nil && !info.IsDir() {
+			// filter by extension
+			if slices.Contains[[]string](VALID_EXT, filepath.Ext(path)) {
+				absolutePaths = append(absolutePaths, path)
+			}
+		}
+
+	}
+
+	// get file reader
 	sourceProvider := audio.GetAudioSourceProvider()
 
 	sources := make([]audio.AudioSource, 0)
-	for _, fileName := range os.Args[1:] {
+	for _, fileName := range absolutePaths {
 		source, err := sourceProvider.GetAudioSourceFromFile(fileName)
 		if err != nil {
 			fmt.Println(err)
@@ -55,7 +93,7 @@ func main() {
 			maxLength = len(arg)
 		}
 	}
-	queueWin := root.NewChild(Box{0, 0, uint(7 + maxLength), uint(4 + len(os.Args[1:]))})
+	queueWin := root.NewChild(Box{0, 0, uint(7 + maxLength), uint(4 + len(sources))})
 
 	queueWin.Exec(queueWin.DrawBox(Box{0, 0, queueWin.w, queueWin.h}, " Queue "))
 	listCom := queueWin.GetOffsetComBuilder().Offset(1, 1)
