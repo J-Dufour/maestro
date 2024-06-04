@@ -165,7 +165,7 @@ func (p *Player) publishQueueUpdate() {
 }
 
 func (player *Player) playerThread() {
-	CLK_DUR := 100 * time.Millisecond
+	CLK_DUR := 50 * time.Millisecond
 
 	client := player.client
 	format := client.GetPCMWaveFormat()

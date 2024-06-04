@@ -40,7 +40,7 @@ func getDefaultWindowsClient() (winClient *WinAudioClient, err error) {
 
 	sharemode := int32(0)
 	flags := int32(0)
-	hnsBufDuration := int64(100 * 1e6) // 100 ms
+	hnsBufDuration := int64(1 * 1e6) // 100 ms
 	period := 0
 	err = winClient.client.Initialize(sharemode, flags, hnsBufDuration, int64(period), winClient.format)
 	if err != nil {
