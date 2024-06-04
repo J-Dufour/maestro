@@ -10,6 +10,65 @@ import (
 )
 
 const (
+	BOLD    = 1
+	NO_BOLD = 22
+
+	UNDERLINE    = 4
+	NO_UNDERLINE = 24
+
+	NEGATIVE = 7
+	POSITIVE = 27
+
+	FG_BLACK   = 30
+	FG_RED     = 31
+	FG_GREEN   = 32
+	FG_YELLOW  = 33
+	FG_BLUE    = 34
+	FG_MAGENTA = 35
+	FG_CYAN    = 36
+	FG_WHITE   = 37
+	FG_EXT     = 38
+	FG_DEFAULT = 39
+
+	BG_BLACK   = 40
+	BG_RED     = 41
+	BG_GREEN   = 42
+	BG_YELLOW  = 43
+	BG_BLUE    = 44
+	BG_MAGENTA = 45
+	BG_CYAN    = 46
+	BG_WHITE   = 47
+	BG_EXT     = 48
+	BG_DEFAULT = 49
+
+	FG_BLACK_B   = 90
+	FG_RED_B     = 91
+	FG_GREEN_B   = 92
+	FG_YELLOW_B  = 93
+	FG_BLUE_B    = 94
+	FG_MAGENTA_B = 95
+	FG_CYAN_B    = 96
+	FG_WHITE_B   = 97
+
+	BG_BLACK_B   = 100
+	BG_RED_B     = 101
+	BG_GREEN_B   = 102
+	BG_YELLOW_B  = 103
+	BG_BLUE_B    = 104
+	BG_MAGENTA_B = 105
+	BG_CYAN_B    = 106
+	BG_WHITE_B   = 107
+)
+
+func FG_RGB(r int, g int, b int) (int, int, int, int, int) {
+	return 38, 2, r, g, b
+}
+
+func BG_RGB(r int, g int, b int) (int, int, int, int, int) {
+	return 48, 2, r, g, b
+}
+
+const (
 	ESC      = '\x1b'
 	BOX_S_H  = '─'
 	BOX_S_V  = '│'
@@ -80,10 +139,11 @@ func (cb *ComBuilder) Write(text ...any) *ComBuilder {
 func (cb *ComBuilder) MoveLines(lines int) *ComBuilder {
 	if lines > 0 {
 		cb.builder.WriteString(fmt.Sprintf("%c[%dE", ESC, lines))
+		cb.Offset(int(cb.offX), 0)
 	} else if lines < 0 {
 		cb.builder.WriteString(fmt.Sprintf("%c[%dF", ESC, -lines))
+		cb.Offset(int(cb.offX), 0)
 	}
-	cb.Offset(int(cb.offX), 0)
 	return cb
 }
 
@@ -113,12 +173,34 @@ func (cb *ComBuilder) DrawBox(box Box, title string) *ComBuilder {
 	return cb.MoveLines(1).Offset(int(box.x), 0).Write(BOX_S_BL, strings.Repeat(string(BOX_S_H), int(box.w)-2), BOX_S_BR)
 }
 
+func (cb *ComBuilder) SelectGraphicsRendition(formatOptions ...int) *ComBuilder {
+	if len(formatOptions) < 1 {
+		return cb
+	}
+	cb.builder.WriteString(fmt.Sprintf("%c[%d", ESC, formatOptions[0]))
+	for opt := range formatOptions[1:] {
+		cb.builder.WriteString(fmt.Sprintf(";%d", opt))
+	}
+	cb.builder.WriteByte('m')
+	return cb
+}
+
+func (cb *ComBuilder) ClearGraphicsRendition() *ComBuilder {
+	cb.builder.WriteRune(ESC)
+	cb.builder.WriteString("[0m")
+	return cb
+}
+
 type Window struct {
 	parent   *Window
 	children []*Window
 	Box
 
 	coms chan Com
+}
+
+func (win *Window) GetDimensions() (w int, h int) {
+	return int(win.w), int(win.h)
 }
 
 func (win *Window) WithinBounds(box Box) bool {
@@ -156,7 +238,7 @@ func (win *Window) GetOffsetComBuilder() *ComBuilder {
 		cb.offX += win.x
 		cb.offY += win.y
 		//starting offset
-		cb.Offset(int(win.x), int(win.x))
+		cb.Offset(int(win.x), int(win.y))
 	} else {
 		cb = &ComBuilder{0, 0, &strings.Builder{}}
 		cb.MoveTo(0, 0)
@@ -187,7 +269,7 @@ func InitTerminalLoop(freq int) (root *Window, loop func(), userInput chan byte)
 	//define root window
 	w, h := GetDimensions()
 
-	commands := make(chan Com, 16)
+	commands := make(chan Com, 64)
 	root = &Window{nil, []*Window{}, Box{1, 1, uint(w), uint(h)}, commands}
 	userInput = make(chan byte)
 	return root, startTerminalLoop(freq, commands, userInput, old), userInput

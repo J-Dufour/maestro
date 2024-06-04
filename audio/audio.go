@@ -6,6 +6,10 @@ import (
 )
 
 const (
+	EVENT_SOURCE_CHANGE = iota
+)
+
+const (
 	CTL_PLAY = iota
 	CTL_PAUSE
 	CTL_SKIP
@@ -72,7 +76,12 @@ type Player struct {
 
 	control chan int
 
-	queueIn chan AudioSource
+	queueIn  chan AudioSource
+	queue    []AudioSource
+	queueIdx int
+
+	sourceChangeSubscribers []chan<- struct{}
+	queueUpdateSubscribers  []chan<- struct{}
 }
 
 func getDefaultClient() (AudioClient, error) {
@@ -88,6 +97,11 @@ func NewPlayer() (player *Player, err error) {
 
 	player.control = make(chan int, 16)
 	player.queueIn = make(chan AudioSource, 2)
+	player.queue = make([]AudioSource, 0)
+	player.queueIdx = 0
+
+	player.queueUpdateSubscribers = make([]chan<- struct{}, 0)
+	player.sourceChangeSubscribers = make([]chan<- struct{}, 0)
 
 	// make player thread
 	client, err := getDefaultClient()
@@ -122,6 +136,34 @@ func (p *Player) AddSourcesToQueue(sources ...AudioSource) {
 	}
 }
 
+func (p *Player) GetQueue() []AudioSource {
+	return append(make([]AudioSource, 0, len(p.queue)), p.queue...)
+}
+
+func (p *Player) GetPositionInQueue() int {
+	return p.queueIdx
+}
+
+func (p *Player) SubscribeToSourceChange(c chan<- struct{}) {
+	p.sourceChangeSubscribers = append(p.sourceChangeSubscribers, c)
+}
+
+func (p *Player) publishSourceChange() {
+	for _, c := range p.sourceChangeSubscribers {
+		c <- struct{}{}
+	}
+}
+
+func (p *Player) SubscribeToQueueUpdate(c chan<- struct{}) {
+	p.queueUpdateSubscribers = append(p.queueUpdateSubscribers, c)
+}
+
+func (p *Player) publishQueueUpdate() {
+	for _, c := range p.queueUpdateSubscribers {
+		c <- struct{}{}
+	}
+}
+
 func (player *Player) playerThread() {
 	CLK_DUR := 100 * time.Millisecond
 
@@ -129,8 +171,6 @@ func (player *Player) playerThread() {
 	format := client.GetPCMWaveFormat()
 
 	//initialize audio queue
-	queue := make([]AudioSource, 0)
-	idx := 0
 	var curSource AudioSource
 	waitingForNextTrack := true
 
@@ -154,9 +194,11 @@ func (player *Player) playerThread() {
 	for {
 		select {
 		case source := <-player.queueIn:
-			queue = append(queue, source)
+			player.queue = append(player.queue, source)
+			player.publishQueueUpdate()
 			if waitingForNextTrack {
-				curSource = queue[idx]
+				curSource = player.queue[player.queueIdx]
+				player.publishSourceChange()
 				clock.Reset(CLK_DUR)
 				waitingForNextTrack = false
 			}
@@ -170,19 +212,20 @@ func (player *Player) playerThread() {
 				//grab exra data
 				amt := <-player.control
 
-				if amt == 0 || idx >= len(queue) { //if skipping 0 songs, or if index is already waiting, skip
+				if amt == 0 || player.queueIdx >= len(player.queue) { //if skipping 0 songs, or if index is already waiting, skip
 					break
 				}
-				idx += amt
-				idx = Clamp(idx, 0, len(queue))
-				if idx < len(queue) {
+				player.queueIdx += amt
+				player.queueIdx = Clamp(player.queueIdx, 0, len(player.queue))
+				player.publishSourceChange()
+				if player.queueIdx < len(player.queue) {
 					waitingForNextTrack = false
 
 					// interrupt current song
 					leftover = leftover[:0]
 					client.ClearBuffer()
 					// play next song
-					curSource = queue[idx]
+					curSource = player.queue[player.queueIdx]
 					clock.Reset(CLK_DUR)
 				} else {
 					// wait for next song
@@ -212,9 +255,9 @@ func (player *Player) playerThread() {
 				frames, err := curSource.ReadNext()
 				if err == io.EOF {
 					// exit and move to next song
-					idx++
-					if idx < len(queue) {
-						curSource = queue[idx]
+					player.queueIdx++
+					if player.queueIdx < len(player.queue) {
+						curSource = player.queue[player.queueIdx]
 					} else { //if no next song, wait.
 						waitingForNextTrack = true
 						clock.Stop()
