@@ -98,7 +98,7 @@ func main() {
 		}
 	}
 
-	outerQueueWin := root.NewChild(Box{0, 0, 80, 24})
+	outerQueueWin := root.NewChild(Box{0, 0, 40, 14})
 	outerQueueWin.Exec(outerQueueWin.DrawBox(Box{0, 0, 40, 14}, " Queue "))
 	innerQueueWin := outerQueueWin.NewChild(Box{1, 1, 38, 12})
 
