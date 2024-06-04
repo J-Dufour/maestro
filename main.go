@@ -81,7 +81,7 @@ func main() {
 	}
 
 	// start UI
-	root, initLoop, input := InitTerminalLoop(20)
+	root, initLoop, input := InitTerminalLoop()
 
 	// start input interpreter
 	go inputDecoder(input, player)

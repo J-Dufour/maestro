@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"golang.org/x/term"
 )
@@ -259,7 +258,7 @@ func (win *Window) Exec(com Com) {
 	win.coms <- com
 }
 
-func InitTerminalLoop(freq int) (root *Window, loop func(), userInput chan byte) {
+func InitTerminalLoop() (root *Window, loop func(), userInput chan byte) {
 	old, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		fmt.Println(err)
@@ -272,13 +271,12 @@ func InitTerminalLoop(freq int) (root *Window, loop func(), userInput chan byte)
 	commands := make(chan Com, 64)
 	root = &Window{nil, []*Window{}, Box{1, 1, uint(w), uint(h)}, commands}
 	userInput = make(chan byte)
-	return root, startTerminalLoop(freq, commands, userInput, old), userInput
+	return root, startTerminalLoop(commands, userInput, old), userInput
 }
 
-func startTerminalLoop(freq int, commands chan Com, userIn chan byte, oldState *term.State) func() {
+func startTerminalLoop(commands chan Com, userIn chan byte, oldState *term.State) func() {
 	return func() {
 		defer endTerminalLoop(oldState)
-		clock := time.NewTicker(time.Second / time.Duration(freq))
 
 		inChan := make(chan byte, 8)
 		go inputLoop(inChan)
@@ -286,7 +284,6 @@ func startTerminalLoop(freq int, commands chan Com, userIn chan byte, oldState *
 		fmt.Printf("%c[?25l", ESC)
 
 		for {
-			<-clock.C
 			select {
 			case command := <-commands:
 				fmt.Print(command)
