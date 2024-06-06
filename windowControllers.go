@@ -132,7 +132,7 @@ const (
 )
 
 func NewPlayerWindowController(win *Window) *PlayerWindowController {
-	controller := &PlayerWindowController{win, audio.Metadata{}, 0, 0}
+	controller := &PlayerWindowController{win, *audio.NewMetadata(), 0, 0}
 	controller.Resize()
 
 	return controller
