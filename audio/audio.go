@@ -35,6 +35,7 @@ type Metadata struct {
 	Filepath string
 
 	Title  string
+	Album  string
 	Artist string
 
 	Duration uint64
@@ -45,6 +46,7 @@ func NewMetadata() (m *Metadata) {
 	m.Filepath = NOT_FOUND
 	m.Title = NOT_FOUND
 	m.Artist = NOT_FOUND
+	m.Album = NOT_FOUND
 	m.Duration = 0
 	return m
 }

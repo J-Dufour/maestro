@@ -129,6 +129,11 @@ func createWinAudioSourceFromFile(path string) (AudioSource, error) {
 		metadata.Title = decodeValue(title).(string)
 	}
 
+	album, err := propStore.GetValue(&win32.PKEY_Music_AlbumTitle)
+	if err == nil {
+		metadata.Album = decodeValue(album).(string)
+	}
+
 	artist, err := propStore.GetValue(&win32.PKEY_Music_Artist)
 	if err == nil {
 		metadata.Artist = decodeValue(artist).(string)
