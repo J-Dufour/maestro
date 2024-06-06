@@ -36,6 +36,8 @@ type Metadata struct {
 
 	Title  string
 	Artist string
+
+	Duration uint64
 }
 
 func NewMetadata() (m *Metadata) {
@@ -59,7 +61,7 @@ type AudioClient interface {
 }
 
 type AudioSource interface {
-	ReadNext() ([]byte, error)
+	ReadNext() ([]byte, int, error)
 	SetPCMWaveFormat(*PCMWaveFormat) error
 	GetPCMWaveFormat() (*PCMWaveFormat, error)
 
@@ -75,6 +77,8 @@ type Player struct {
 	format *PCMWaveFormat
 
 	control chan int
+
+	trackPosition int // in 100ns units
 
 	queueIn  chan AudioSource
 	queue    []AudioSource
@@ -144,6 +148,10 @@ func (p *Player) GetPositionInQueue() int {
 	return p.queueIdx
 }
 
+func (p *Player) GetPositionInTrack() int {
+	return p.trackPosition
+}
+
 func (p *Player) SubscribeToSourceChange(c chan<- struct{}) {
 	p.sourceChangeSubscribers = append(p.sourceChangeSubscribers, c)
 }
@@ -165,7 +173,7 @@ func (p *Player) publishQueueUpdate() {
 }
 
 func (player *Player) playerThread() {
-	CLK_DUR := 50 * time.Millisecond
+	CLK_DUR := 100 * time.Millisecond
 
 	client := player.client
 	format := client.GetPCMWaveFormat()
@@ -189,7 +197,14 @@ func (player *Player) playerThread() {
 	// create clock
 	clock := time.NewTicker(CLK_DUR)
 	clock.Stop() // wait for first track
-	//
+
+	// last known timestamp
+	lastKnownTS := 0
+
+	// if EOF is reached
+	reachedEOF := false
+
+	bytesTo100ns := (8 * 1e7) / (int(format.SampleDepth) * int(format.SampleRate) * int(format.NumChannels))
 
 	for {
 		select {
@@ -241,6 +256,29 @@ func (player *Player) playerThread() {
 			if err != nil {
 				panic(err)
 			}
+
+			// Estimate timestamp
+			totalBufferedData := (padding * frameSize) + len(leftover)
+			timeDiff := totalBufferedData * bytesTo100ns
+			player.trackPosition = lastKnownTS - timeDiff
+
+			if reachedEOF && player.trackPosition == lastKnownTS { //if song is done
+				reachedEOF = false
+				// exit and move to next song
+				player.queueIdx++
+				if player.queueIdx < len(player.queue) {
+					curSource = player.queue[player.queueIdx]
+				} else { //if no next song, wait.
+					waitingForNextTrack = true
+					clock.Stop()
+					player.publishSourceChange()
+					break
+				}
+				lastKnownTS = 0
+				player.publishSourceChange()
+
+			}
+
 			freeFrames := bufferFrames - padding
 
 			// initialize accumulator
@@ -252,18 +290,10 @@ func (player *Player) playerThread() {
 
 			//load new data
 			for i := 0; totalCopied < freeFrames*frameSize; i++ {
-				frames, err := curSource.ReadNext()
+				frames, timestamp, err := curSource.ReadNext()
 				if err == io.EOF {
-					// exit and move to next song
-					player.queueIdx++
-					if player.queueIdx < len(player.queue) {
-						curSource = player.queue[player.queueIdx]
-					} else { //if no next song, wait.
-						waitingForNextTrack = true
-						clock.Stop()
-					}
+					reachedEOF = true
 					break
-
 				} else if err != nil {
 					panic(err)
 				}
@@ -272,6 +302,7 @@ func (player *Player) playerThread() {
 					leftover = frames[copied:]
 				}
 				totalCopied += copied
+				lastKnownTS = timestamp + len(frames)*bytesTo100ns
 			}
 
 			//load into buffer

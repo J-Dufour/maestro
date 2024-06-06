@@ -40,7 +40,7 @@ func getDefaultWindowsClient() (winClient *WinAudioClient, err error) {
 
 	sharemode := int32(0)
 	flags := int32(0)
-	hnsBufDuration := int64(1 * 1e6) // 100 ms
+	hnsBufDuration := int64(100 * 1e6) // 100 ms
 	period := 0
 	err = winClient.client.Initialize(sharemode, flags, hnsBufDuration, int64(period), winClient.format)
 	if err != nil {
@@ -134,6 +134,11 @@ func createWinAudioSourceFromFile(path string) (AudioSource, error) {
 		metadata.Artist = decodeValue(artist).(string)
 	}
 
+	duration, err := propStore.GetValue(&win32.PKEY_Media_Duration)
+	if err == nil {
+		metadata.Duration = decodeValue(duration).(uint64)
+	}
+
 	return &WinAudioSource{metadata, sourceReader}, nil
 }
 
@@ -167,30 +172,30 @@ type WinAudioSource struct {
 	reader   *win32.MFSourceReader
 }
 
-func (winSource *WinAudioSource) ReadNext() (data []byte, err error) {
+func (winSource *WinAudioSource) ReadNext() (data []byte, tstamp int, err error) {
 	//get sample
-	_, _, _, sample, err := winSource.reader.ReadSample(win32.MF_SOURCE_READER_ANY_STREAM, 0)
+	_, _, timestamp, sample, err := winSource.reader.ReadSample(win32.MF_SOURCE_READER_ANY_STREAM, 0)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	//get buffer
 	buffer, err := sample.ConvertToContiguousBuffer()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	//return slice
 	buffPtr, _, length, err := buffer.Lock()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	data = make([]byte, length)
 	copy(data, unsafe.Slice(buffPtr, length))
 
 	buffer.Unlock()
-	return data, nil
+	return data, int(timestamp), nil
 }
 
 func (winSource *WinAudioSource) GetPCMWaveFormat() (wav *PCMWaveFormat, err error) {

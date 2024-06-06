@@ -85,28 +85,25 @@ func main() {
 	// start input interpreter
 	go inputDecoder(input, player)
 
-	// make static queue view
-	queue := make([]string, 0)
-	for _, source := range sources {
-		queue = append(queue, fmt.Sprintf("%s - %s", source.GetMetadata().Title, source.GetMetadata().Artist))
-	}
-	maxLength := len(queue[0])
-	for _, arg := range queue[1:] {
-		if maxLength < len(arg) {
-			maxLength = len(arg)
-		}
-	}
-
+	// make queue view
 	outerQueueWin := root.NewChild(Box{0, 0, 40, 14})
 	outerQueueWin.Exec(outerQueueWin.DrawBox(Box{0, 0, 40, 14}, " Queue "))
 	innerQueueWin := outerQueueWin.NewChild(Box{1, 1, 38, 12})
 
-	controller := NewQueueWindowController(innerQueueWin)
+	Qcontroller := NewQueueWindowController(innerQueueWin)
+	StartQueueWindowLoop(Qcontroller, player)
 
-	StartQueueWindowLoop(controller, player)
+	// make player view
+	outerPlayerWin := root.NewChild(Box{41, 0, 40, 14})
+	outerPlayerWin.Exec(outerPlayerWin.DrawBox(Box{0, 0, 40, 14}, " Player "))
+	innerPlayerWin := outerPlayerWin.NewChild(Box{1, 1, 38, 12})
+
+	Pcontroller := NewPlayerWindowController(innerPlayerWin)
+	StartPlayerWindowLoop(Pcontroller, player)
 
 	player.AddSourcesToQueue(sources...)
 	player.Start()
+
 	initLoop()
 }
 

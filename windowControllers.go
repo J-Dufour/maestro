@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"math"
+	"strings"
+	"time"
 
 	"github.com/J-Dufour/maestro/audio"
 )
@@ -105,6 +107,79 @@ func StartQueueWindowLoop(con *QueueWindowController, player *audio.Player) {
 			case <-songUpdated:
 				// clear previous
 				con.Highlight(player.GetPositionInQueue())
+			}
+		}
+	}()
+}
+
+type PlayerWindowController struct {
+	win *Window
+
+	metadata audio.Metadata
+
+	w int
+	h int
+}
+
+const (
+	LINE_START = '├'
+	LINE_MID   = '─'
+	LINE_END   = '┤'
+
+	CURSOR_START = '┠'
+	CURSOR_MID   = '┼'
+	CURSOR_END   = '┨'
+)
+
+func NewPlayerWindowController(win *Window) *PlayerWindowController {
+	controller := &PlayerWindowController{win, audio.Metadata{}, 0, 0}
+	controller.Resize()
+
+	return controller
+}
+
+func (p *PlayerWindowController) Resize() {
+	p.w, p.h = p.win.GetDimensions()
+}
+
+func (p *PlayerWindowController) SetNewSource(source audio.AudioSource) {
+	p.metadata = source.GetMetadata()
+}
+
+func (p *PlayerWindowController) SetTrackPosition(pos int64) {
+	duration := p.metadata.Duration
+	ratio := float64(pos) / float64(duration)
+	realPos := int(ratio * float64(p.w))
+	if realPos > p.w-1 {
+		realPos = p.w - 1
+	}
+	var cursor rune
+	switch realPos {
+	case 0:
+		cursor = CURSOR_START
+	case p.w - 1:
+		cursor = CURSOR_END
+	default:
+		cursor = CURSOR_MID
+	}
+
+	p.win.Exec(p.win.GetOffsetComBuilder().MoveLines(p.h-1).Write(LINE_START, strings.Repeat(string(LINE_MID), p.w-2), LINE_END).MoveTo(uint(realPos)+1, uint(p.h)).Write(cursor).BuildCom())
+}
+
+func StartPlayerWindowLoop(p *PlayerWindowController, player *audio.Player) {
+	songUpdated := make(chan struct{})
+	player.SubscribeToSourceChange(songUpdated)
+
+	go func() {
+		period := 500 * time.Millisecond
+		clock := time.NewTicker(period)
+		for {
+			select {
+			case <-songUpdated:
+				p.SetNewSource(player.GetQueue()[player.GetPositionInQueue()])
+				p.SetTrackPosition(int64(player.GetPositionInTrack()))
+			case <-clock.C:
+				p.SetTrackPosition(int64(player.GetPositionInTrack()))
 			}
 		}
 	}()

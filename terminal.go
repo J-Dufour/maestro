@@ -268,7 +268,7 @@ func InitTerminalLoop() (root *Window, loop func(), userInput chan byte) {
 	//define root window
 	w, h := GetDimensions()
 
-	commands := make(chan Com, 64)
+	commands := make(chan Com, 256)
 	root = &Window{nil, []*Window{}, Box{1, 1, uint(w), uint(h)}, commands}
 	userInput = make(chan byte)
 	return root, startTerminalLoop(commands, userInput, old), userInput
