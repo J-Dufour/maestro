@@ -56,7 +56,7 @@ func (q *QueueWindowController) UpdateQueue(queue []audio.AudioSource) {
 		}
 		builder.Write(q.getQueueLine(i+1, source.GetMetadata())).MoveLines(1)
 	}
-	q.win.Exec(builder.BuildCom())
+	builder.Exec()
 
 	// highlight
 	q.Highlight(q.sourceIdx)
@@ -88,7 +88,7 @@ func (q *QueueWindowController) Highlight(idx int) {
 
 	metadata = q.queue[q.sourceIdx].GetMetadata()
 	builder.MoveTo(1, uint(q.sourceIdx+1)).SelectGraphicsRendition(NEGATIVE).Write(q.getQueueLine(q.sourceIdx+1, metadata)).ClearGraphicsRendition()
-	q.win.Exec(builder.BuildCom())
+	builder.Exec()
 }
 
 func StartQueueWindowLoop(con *QueueWindowController, player *audio.Player) {
@@ -173,17 +173,17 @@ func (p *PlayerWindowController) SetNewSource(source audio.AudioSource) {
 	switch len(p.infoLines) {
 	case 1:
 		line := centeredString(concatMax(p.w, " - ", p.metadata.Title, p.metadata.Album, p.metadata.Artist), p.w)
-		p.win.Exec(p.win.GetOffsetComBuilder().MoveTo(1, uint(p.infoLines[0])).Write(line).BuildCom())
+		p.win.GetOffsetComBuilder().MoveTo(1, uint(p.infoLines[0])).Write(line).Exec()
 	case 2:
 		line1 := centeredString(concatMax(p.w, " - ", p.metadata.Title, p.metadata.Album), p.w)
 		line2 := centeredString(concatMax(p.w, " - ", p.metadata.Artist), p.w)
 
-		p.win.Exec(p.win.GetOffsetComBuilder().MoveTo(1, uint(p.infoLines[0])).Write(line1).MoveTo(1, uint(p.infoLines[1])).Write(line2).BuildCom())
+		p.win.GetOffsetComBuilder().MoveTo(1, uint(p.infoLines[0])).Write(line1).MoveTo(1, uint(p.infoLines[1])).Write(line2).Exec()
 	case 3:
 		line1 := centeredString(concatMax(p.w, "", p.metadata.Title), p.w)
 		line2 := centeredString(concatMax(p.w, "", p.metadata.Album), p.w)
 		line3 := centeredString(concatMax(p.w, "", p.metadata.Artist), p.w)
-		p.win.Exec(p.win.GetOffsetComBuilder().MoveTo(1, uint(p.infoLines[0])).Write(line1).MoveTo(1, uint(p.infoLines[1])).Write(line2).MoveTo(1, uint(p.infoLines[2])).Write(line3).BuildCom())
+		p.win.GetOffsetComBuilder().MoveTo(1, uint(p.infoLines[0])).Write(line1).MoveTo(1, uint(p.infoLines[1])).Write(line2).MoveTo(1, uint(p.infoLines[2])).Write(line3).Exec()
 	}
 }
 
@@ -227,7 +227,7 @@ func (p *PlayerWindowController) SetTrackPosition(pos int64) {
 		cursor = CURSOR_MID
 	}
 
-	p.win.Exec(p.win.GetOffsetComBuilder().MoveTo(1, uint(p.trackLine)).Write(LINE_START, strings.Repeat(string(LINE_MID), p.w-2), LINE_END).MoveTo(uint(realPos)+1, uint(p.trackLine)).Write(cursor).BuildCom())
+	p.win.GetOffsetComBuilder().MoveTo(1, uint(p.trackLine)).Write(LINE_START, strings.Repeat(string(LINE_MID), p.w-2), LINE_END).MoveTo(uint(realPos)+1, uint(p.trackLine)).Write(cursor).Exec()
 }
 
 func StartPlayerWindowLoop(p *PlayerWindowController, player *audio.Player) {

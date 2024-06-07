@@ -87,7 +87,7 @@ func main() {
 
 	// make queue view
 	outerQueueWin := root.NewChild(Box{0, 0, 40, 14})
-	outerQueueWin.Exec(outerQueueWin.DrawBox(Box{0, 0, 40, 14}, " Queue "))
+	outerQueueWin.GetOffsetComBuilder().DrawBox(Box{0, 0, 40, 14}, " Queue ").Exec()
 	innerQueueWin := outerQueueWin.NewChild(Box{1, 1, 38, 12})
 
 	Qcontroller := NewQueueWindowController(innerQueueWin)
@@ -95,7 +95,7 @@ func main() {
 
 	// make player view
 	outerPlayerWin := root.NewChild(Box{41, 0, 40, 14})
-	outerPlayerWin.Exec(outerPlayerWin.DrawBox(Box{0, 0, 40, 14}, " Player "))
+	outerPlayerWin.GetOffsetComBuilder().DrawBox(Box{0, 0, 40, 14}, " Player ").Exec()
 	innerPlayerWin := outerPlayerWin.NewChild(Box{1, 1, 38, 12})
 
 	Pcontroller := NewPlayerWindowController(innerPlayerWin)

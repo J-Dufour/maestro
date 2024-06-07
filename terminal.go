@@ -90,8 +90,10 @@ func boxesCollide(box1 Box, box2 Box) bool {
 
 type Com string
 type ComBuilder struct {
-	offX    uint
-	offY    uint
+	offX uint
+	offY uint
+
+	win     *Window
 	builder *strings.Builder
 }
 
@@ -190,6 +192,11 @@ func (cb *ComBuilder) ClearGraphicsRendition() *ComBuilder {
 	return cb
 }
 
+func (cb *ComBuilder) Exec() {
+	// sends command to window
+	cb.win.Exec(cb.BuildCom())
+}
+
 type Window struct {
 	parent   *Window
 	children []*Window
@@ -236,22 +243,16 @@ func (win *Window) GetOffsetComBuilder() *ComBuilder {
 		//permanent offset for dealing with relative coordinates
 		cb.offX += win.x
 		cb.offY += win.y
+
+		cb.win = win
 		//starting offset
 		cb.Offset(int(win.x), int(win.y))
 	} else {
-		cb = &ComBuilder{0, 0, &strings.Builder{}}
+		cb = &ComBuilder{0, 0, win, &strings.Builder{}}
 		cb.MoveTo(0, 0)
 	}
 
 	return cb
-}
-
-func (win *Window) DrawBox(box Box, title string) Com {
-	if !win.WithinBounds(box) {
-		return ""
-	}
-
-	return win.GetOffsetComBuilder().DrawBox(box, title).BuildCom()
 }
 
 func (win *Window) Exec(com Com) {
