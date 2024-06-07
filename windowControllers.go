@@ -117,6 +117,9 @@ type PlayerWindowController struct {
 
 	metadata audio.Metadata
 
+	infoLines []int
+	trackLine int
+
 	w int
 	h int
 }
@@ -132,7 +135,7 @@ const (
 )
 
 func NewPlayerWindowController(win *Window) *PlayerWindowController {
-	controller := &PlayerWindowController{win, *audio.NewMetadata(), 0, 0}
+	controller := &PlayerWindowController{win, *audio.NewMetadata(), []int{}, 1, 0, 0}
 	controller.Resize()
 
 	return controller
@@ -140,10 +143,71 @@ func NewPlayerWindowController(win *Window) *PlayerWindowController {
 
 func (p *PlayerWindowController) Resize() {
 	p.w, p.h = p.win.GetDimensions()
+
+	// center info
+	switch {
+	case p.h == 1:
+		p.infoLines = []int{}
+		p.trackLine = 1
+	case p.h == 2:
+		p.infoLines = []int{1}
+		p.trackLine = 2
+	case p.h == 3:
+		p.infoLines = []int{1, 2}
+		p.trackLine = 3
+	case p.h < 7:
+		start := (p.h-4)/2 + 1
+		p.infoLines = []int{start, start + 1, start + 2}
+		p.trackLine = start + 3
+	default:
+		start := (p.h-7)/2 + 1
+		p.infoLines = []int{start, start + 2, start + 4}
+		p.trackLine = start + 6
+	}
 }
 
 func (p *PlayerWindowController) SetNewSource(source audio.AudioSource) {
 	p.metadata = source.GetMetadata()
+
+	//draw
+	switch len(p.infoLines) {
+	case 1:
+		line := centeredString(concatMax(p.w, " - ", p.metadata.Title, p.metadata.Album, p.metadata.Artist), p.w)
+		p.win.Exec(p.win.GetOffsetComBuilder().MoveTo(1, uint(p.infoLines[0])).Write(line).BuildCom())
+	case 2:
+		line1 := centeredString(concatMax(p.w, " - ", p.metadata.Title, p.metadata.Album), p.w)
+		line2 := centeredString(concatMax(p.w, " - ", p.metadata.Artist), p.w)
+
+		p.win.Exec(p.win.GetOffsetComBuilder().MoveTo(1, uint(p.infoLines[0])).Write(line1).MoveTo(1, uint(p.infoLines[1])).Write(line2).BuildCom())
+	case 3:
+		line1 := centeredString(concatMax(p.w, "", p.metadata.Title), p.w)
+		line2 := centeredString(concatMax(p.w, "", p.metadata.Album), p.w)
+		line3 := centeredString(concatMax(p.w, "", p.metadata.Artist), p.w)
+		p.win.Exec(p.win.GetOffsetComBuilder().MoveTo(1, uint(p.infoLines[0])).Write(line1).MoveTo(1, uint(p.infoLines[1])).Write(line2).MoveTo(1, uint(p.infoLines[2])).Write(line3).BuildCom())
+	}
+}
+
+func concatMax(max int, separator string, strings ...string) (concat string) {
+	concat = strings[0]
+	for _, str := range strings[1:] {
+		if len(concat)+len(separator)+3 >= max {
+			break
+		}
+		concat += separator + str
+	}
+
+	if len(concat) > max {
+		concat = concat[:max-3] + "..."
+	}
+	return concat
+}
+
+func centeredString(str string, width int) string {
+	offset := (width - len(str)) / 2
+	out := strings.Repeat(" ", offset) + str
+	out += strings.Repeat(" ", width-len(out))
+	return out
+
 }
 
 func (p *PlayerWindowController) SetTrackPosition(pos int64) {
@@ -163,7 +227,7 @@ func (p *PlayerWindowController) SetTrackPosition(pos int64) {
 		cursor = CURSOR_MID
 	}
 
-	p.win.Exec(p.win.GetOffsetComBuilder().MoveLines(p.h-1).Write(LINE_START, strings.Repeat(string(LINE_MID), p.w-2), LINE_END).MoveTo(uint(realPos)+1, uint(p.h)).Write(cursor).BuildCom())
+	p.win.Exec(p.win.GetOffsetComBuilder().MoveTo(1, uint(p.trackLine)).Write(LINE_START, strings.Repeat(string(LINE_MID), p.w-2), LINE_END).MoveTo(uint(realPos)+1, uint(p.trackLine)).Write(cursor).BuildCom())
 }
 
 func StartPlayerWindowLoop(p *PlayerWindowController, player *audio.Player) {
