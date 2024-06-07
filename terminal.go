@@ -149,8 +149,14 @@ func (cb *ComBuilder) MoveLines(lines int) *ComBuilder {
 }
 
 func (cb *ComBuilder) Clear() *ComBuilder {
-	cb.builder.WriteRune(ESC)
-	cb.builder.WriteString("[2J")
+	w, h := cb.win.GetDimensions()
+	clearString := strings.Repeat(" ", w)
+	cb.MoveTo(1, 1)
+	for i := 0; i < h; i++ {
+		cb.builder.WriteString(clearString)
+		cb.MoveLines(1)
+	}
+	cb.MoveTo(1, 1)
 	return cb
 }
 
