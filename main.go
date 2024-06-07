@@ -80,7 +80,7 @@ func main() {
 	}
 
 	// start UI
-	root, initLoop, input := InitTerminalLoop()
+	root, done, input := InitTerminalLoop()
 
 	// start input interpreter
 	go inputDecoder(input, player)
@@ -104,7 +104,7 @@ func main() {
 	player.AddSourcesToQueue(sources...)
 	player.Start()
 
-	initLoop()
+	<-done
 }
 
 func inputDecoder(input chan byte, player *audio.Player) {

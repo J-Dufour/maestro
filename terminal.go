@@ -265,8 +265,8 @@ func (win *Window) Exec(com Com) {
 	win.coms <- com
 }
 
-func InitTerminalLoop() (root *Window, loop func(), userInput chan byte) {
-	old, err := term.MakeRaw(int(os.Stdin.Fd()))
+func InitTerminalLoop() (root *Window, quit chan struct{}, outgoingUserInput chan byte) {
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -275,34 +275,39 @@ func InitTerminalLoop() (root *Window, loop func(), userInput chan byte) {
 	//define root window
 	w, h := GetDimensions()
 
-	commands := make(chan Com, 256)
+	commands := make(chan Com, 32)
 	root = &Window{nil, []*Window{}, Box{1, 1, uint(w), uint(h)}, commands}
-	userInput = make(chan byte)
-	return root, startTerminalLoop(commands, userInput, old), userInput
+
+	inChan := make(chan byte, 8)
+	go inputLoop(inChan)
+
+	outgoingUserInput = make(chan byte)
+	quitChan := make(chan struct{})
+	go terminalLoop(oldState, commands, inChan, outgoingUserInput, quitChan)
+
+	return root, quitChan, outgoingUserInput
 }
 
-func startTerminalLoop(commands chan Com, userIn chan byte, oldState *term.State) func() {
-	return func() {
-		defer endTerminalLoop(oldState)
+func terminalLoop(oldState *term.State, commandChan <-chan Com, userInputChan <-chan byte, outgoingUserInputChan chan<- byte, quitChan chan<- struct{}) {
+	defer endTerminalLoop(oldState)
 
-		inChan := make(chan byte, 8)
-		go inputLoop(inChan)
-		// hide cursor
-		fmt.Printf("%c[?25l", ESC)
+	// hide cursor
+	fmt.Printf("%c[?25l", ESC)
 
-		for {
-			select {
-			case command := <-commands:
-				fmt.Print(command)
-			case in := <-inChan:
-				if in == KEY_QUIT {
-					return
-				} else {
-					userIn <- in
-				}
+	for {
+		select {
+		case command := <-commandChan:
+			fmt.Print(command)
+		case in := <-userInputChan:
+			if in == KEY_QUIT {
+				endTerminalLoop(oldState)
+				quitChan <- struct{}{}
+				return
+			} else {
+				outgoingUserInputChan <- in
 			}
-
 		}
+
 	}
 }
 
