@@ -86,6 +86,13 @@ type Box struct {
 	h uint
 }
 
+type FloatBox struct {
+	x float64
+	y float64
+	w float64
+	h float64
+}
+
 func boxesCollide(box1 Box, box2 Box) bool {
 	return !(box2.x+box2.w <= box1.x || box1.x+box1.w <= box2.x || box2.y+box2.h <= box1.y || box1.y+box1.h <= box2.y)
 }
@@ -206,8 +213,9 @@ func (cb *ComBuilder) Exec() {
 }
 
 type Window struct {
-	parent   *Window
-	children []*Window
+	parent         *Window
+	children       []*Window
+	childPositions []FloatBox
 	Box
 
 	coms chan Com
@@ -240,8 +248,15 @@ func (win *Window) NewChild(box Box) (child *Window) {
 		}
 	}
 
-	child = &Window{win, []*Window{}, box, win.coms, nil}
+	child = &Window{win, []*Window{}, []FloatBox{}, box, win.coms, nil}
 	win.children = append(win.children, child)
+
+	// calculate relative dimensions
+	relX := float64(box.x) / float64(win.w)
+	relY := float64(box.y) / float64(win.h)
+	relW := float64(box.w) / float64(win.w)
+	relH := float64(box.h) / float64(win.h)
+	win.childPositions = append(win.childPositions, FloatBox{relX, relY, relW, relH})
 	return child
 }
 
@@ -265,19 +280,16 @@ func (win *Window) GetOffsetComBuilder() *ComBuilder {
 }
 
 func (win *Window) Resize(b Box) {
-	prevBox := win.Box
 	win.Box = b
 
 	if win.con != nil {
 		win.con.Resize()
 	}
-	xScaleRatio := float64(win.w) / float64(prevBox.w)
-	yScaleRatio := float64(win.h) / float64(prevBox.h)
-	for _, w := range win.children {
-		newX := uint(math.Round(float64(w.x) * xScaleRatio))
-		newY := uint(math.Round(float64(w.y) * yScaleRatio))
-		newW := uint(math.Round(float64(w.w) * xScaleRatio))
-		newH := uint(math.Round(float64(w.h) * yScaleRatio))
+	for i, w := range win.children {
+		newX := uint(math.Round(float64(win.w) * win.childPositions[i].x))
+		newY := uint(math.Round(float64(win.h) * win.childPositions[i].y))
+		newW := uint(math.Round(float64(win.w) * win.childPositions[i].w))
+		newH := uint(math.Round(float64(win.h) * win.childPositions[i].h))
 		w.Resize(Box{newX, newY, newW, newH})
 	}
 
@@ -313,7 +325,7 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, outgoingUserInput cha
 	//define root window
 	GetDimensions := GetWindowDimensionsFunc(commands, dimensions)
 	w, h := GetDimensions()
-	root = &Window{nil, []*Window{}, Box{1, 1, uint(w), uint(h)}, commands, nil}
+	root = &Window{nil, []*Window{}, []FloatBox{}, Box{1, 1, uint(w), uint(h)}, commands, nil}
 
 	//resize loop
 	go func() {
