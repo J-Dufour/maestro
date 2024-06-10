@@ -9,6 +9,24 @@ import (
 	"github.com/J-Dufour/maestro/audio"
 )
 
+type OuterWindowController struct {
+	win *Window
+
+	title string
+}
+
+func NewOuterWindowController(w *Window, title string) *OuterWindowController {
+	out := &OuterWindowController{w, title}
+	out.Resize()
+	return out
+}
+
+func (o *OuterWindowController) Resize() {
+	w, h := o.win.GetDimensions()
+
+	o.win.GetOffsetComBuilder().DrawBox(Box{0, 0, uint(w), uint(h)}, o.title).Exec()
+}
+
 type QueueWindowController struct {
 	win *Window
 
