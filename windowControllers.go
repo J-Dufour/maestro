@@ -168,7 +168,7 @@ func NewPlayerWindowController(win *Window) *PlayerWindowController {
 
 func (p *PlayerWindowController) Resize() {
 	p.w, p.h = p.win.GetDimensions()
-	p.win.GetOffsetComBuilder().Offset(0, -1).Write(fmt.Sprintf("%d - %d", p.w, p.h)).Exec()
+
 	// center info
 	switch {
 	case p.h == 1:
