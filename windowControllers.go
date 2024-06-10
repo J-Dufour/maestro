@@ -180,7 +180,7 @@ func (p *PlayerWindowController) Resize() {
 	case p.h == 3:
 		p.infoLines = []int{1, 2}
 		p.trackLine = 3
-	case p.h < 7:
+	case p.h <= 7:
 		start := (p.h-4)/2 + 1
 		p.infoLines = []int{start, start + 1, start + 2}
 		p.trackLine = start + 3
