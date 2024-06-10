@@ -271,24 +271,24 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, outgoingUserInput cha
 		fmt.Println(err)
 		return
 	}
-
-	//define root window
-	w, h := GetDimensions()
-
-	commands := make(chan Com, 32)
-	root = &Window{nil, []*Window{}, Box{1, 1, uint(w), uint(h)}, commands}
-
 	inChan := make(chan byte, 8)
 	go inputLoop(inChan)
 
 	outgoingUserInput = make(chan byte)
 	quitChan := make(chan struct{})
-	go terminalLoop(oldState, commands, inChan, outgoingUserInput, quitChan)
+	commands := make(chan Com, 32)
+	dimensions := make(chan int)
+	go terminalLoop(oldState, commands, inChan, outgoingUserInput, dimensions, quitChan)
+
+	//define root window
+	GetDimensions := GetWindowDimensionsFunc(commands, dimensions)
+	w, h := GetDimensions()
+	root = &Window{nil, []*Window{}, Box{1, 1, uint(w), uint(h)}, commands}
 
 	return root, quitChan, outgoingUserInput
 }
 
-func terminalLoop(oldState *term.State, commandChan <-chan Com, userInputChan <-chan byte, outgoingUserInputChan chan<- byte, quitChan chan<- struct{}) {
+func terminalLoop(oldState *term.State, commandChan <-chan Com, userInputChan <-chan byte, outgoingUserInputChan chan<- byte, dimensionsChan chan<- int, quitChan chan<- struct{}) {
 	defer endTerminalLoop(oldState)
 
 	// hide cursor
@@ -299,7 +299,26 @@ func terminalLoop(oldState *term.State, commandChan <-chan Com, userInputChan <-
 		case command := <-commandChan:
 			fmt.Print(command)
 		case in := <-userInputChan:
-			if in == KEY_QUIT {
+			if in == byte(ESC) {
+				//read the rest
+				seq := []byte{in, <-userInputChan}
+				for b := range userInputChan {
+					seq = append(seq, b)
+					if b >= 0x40 && b <= 0x7E { //final byte reached
+						break
+					}
+				}
+				// interpret
+				switch seq[len(seq)-1] {
+				case 'R':
+					// window resized
+					var w, h int
+					fmt.Sscanf(string(seq), "\x1b[%d;%dR", &h, &w)
+					dimensionsChan <- w
+					dimensionsChan <- h
+				}
+
+			} else if in == KEY_QUIT {
 				endTerminalLoop(oldState)
 				quitChan <- struct{}{}
 				return
@@ -332,13 +351,15 @@ func inputLoop(input chan byte) {
 	}
 }
 
-func GetDimensions() (w int, h int) {
-	fmt.Print("\x1b[2J\x1b[999C\x1b[999B")
-	fmt.Print("\x1b[6n")
-	input := ReadTo('R')
-	fmt.Sscanf(input, "\x1b[%d;%dR", &h, &w)
-	fmt.Print("\x1b[0;0H")
-	return w, h
+func GetWindowDimensionsFunc(comChan chan<- Com, dimChan <-chan int) func() (int, int) {
+	return func() (w int, h int) {
+		comChan <- "\x1b[2J\x1b[999C\x1b[999B\x1b[6n"
+		w = <-dimChan
+		h = <-dimChan
+
+		fmt.Print("\x1b[0;0H")
+		return w, h
+	}
 }
 
 func ReadTo(b byte) string {
