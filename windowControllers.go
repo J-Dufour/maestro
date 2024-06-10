@@ -17,6 +17,7 @@ type OuterWindowController struct {
 
 func NewOuterWindowController(w *Window, title string) *OuterWindowController {
 	out := &OuterWindowController{w, title}
+	out.win.SetController(out)
 	out.Resize()
 	return out
 }
@@ -41,6 +42,7 @@ type QueueWindowController struct {
 func NewQueueWindowController(w *Window) *QueueWindowController {
 	controller := &QueueWindowController{}
 	controller.win = w
+	controller.win.SetController(controller)
 	controller.queue = make([]audio.AudioSource, 0)
 	controller.sourceIdx = 0
 
@@ -60,11 +62,12 @@ func (q *QueueWindowController) Resize() {
 	}
 
 	q.maxTitleLen = width - q.maxIdxLen - 2
+
+	q.UpdateQueue(q.queue)
 }
 
 func (q *QueueWindowController) UpdateQueue(queue []audio.AudioSource) {
 	q.queue = queue
-	q.Resize()
 
 	// draw queue
 	builder := q.win.GetOffsetComBuilder()
@@ -94,6 +97,9 @@ func (q *QueueWindowController) getQueueLine(idx int, metadata audio.Metadata) s
 }
 
 func (q *QueueWindowController) Highlight(idx int) {
+	if q.sourceIdx == 0 {
+		return
+	}
 	//un-highlight previous
 	metadata := q.queue[q.sourceIdx].GetMetadata()
 	builder := q.win.GetOffsetComBuilder()
@@ -154,6 +160,7 @@ const (
 
 func NewPlayerWindowController(win *Window) *PlayerWindowController {
 	controller := &PlayerWindowController{win, *audio.NewMetadata(), []int{}, 1, 0, 0}
+	controller.win.SetController(controller)
 	controller.Resize()
 
 	return controller
@@ -161,7 +168,7 @@ func NewPlayerWindowController(win *Window) *PlayerWindowController {
 
 func (p *PlayerWindowController) Resize() {
 	p.w, p.h = p.win.GetDimensions()
-
+	p.win.GetOffsetComBuilder().Offset(0, -1).Write(fmt.Sprintf("%d - %d", p.w, p.h)).Exec()
 	// center info
 	switch {
 	case p.h == 1:
@@ -182,10 +189,13 @@ func (p *PlayerWindowController) Resize() {
 		p.infoLines = []int{start, start + 2, start + 4}
 		p.trackLine = start + 6
 	}
+
+	p.SetTrackPosition(0)
+	p.SetNewMetadata(p.metadata)
 }
 
-func (p *PlayerWindowController) SetNewSource(source audio.AudioSource) {
-	p.metadata = source.GetMetadata()
+func (p *PlayerWindowController) SetNewMetadata(source audio.Metadata) {
+	p.metadata = source
 
 	//draw
 	switch len(p.infoLines) {
@@ -258,7 +268,7 @@ func StartPlayerWindowLoop(p *PlayerWindowController, player *audio.Player) {
 		for {
 			select {
 			case <-songUpdated:
-				p.SetNewSource(player.GetQueue()[player.GetPositionInQueue()])
+				p.SetNewMetadata(player.GetQueue()[player.GetPositionInQueue()].GetMetadata())
 				p.SetTrackPosition(int64(player.GetPositionInTrack()))
 			case <-clock.C:
 				p.SetTrackPosition(int64(player.GetPositionInTrack()))

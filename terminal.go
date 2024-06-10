@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -209,6 +211,7 @@ type Window struct {
 	Box
 
 	coms chan Com
+	con  Controller
 }
 
 func (win *Window) GetDimensions() (w int, h int) {
@@ -237,7 +240,7 @@ func (win *Window) NewChild(box Box) (child *Window) {
 		}
 	}
 
-	child = &Window{win, []*Window{}, box, win.coms}
+	child = &Window{win, []*Window{}, box, win.coms, nil}
 	win.children = append(win.children, child)
 	return child
 }
@@ -261,8 +264,35 @@ func (win *Window) GetOffsetComBuilder() *ComBuilder {
 	return cb
 }
 
+func (win *Window) Resize(b Box) {
+	prevBox := win.Box
+	win.Box = b
+
+	if win.con != nil {
+		win.con.Resize()
+	}
+	xScaleRatio := float64(win.w) / float64(prevBox.w)
+	yScaleRatio := float64(win.h) / float64(prevBox.h)
+	for _, w := range win.children {
+		newX := uint(math.Round(float64(w.x) * xScaleRatio))
+		newY := uint(math.Round(float64(w.y) * yScaleRatio))
+		newW := uint(math.Round(float64(w.w) * xScaleRatio))
+		newH := uint(math.Round(float64(w.h) * yScaleRatio))
+		w.Resize(Box{newX, newY, newW, newH})
+	}
+
+}
+
 func (win *Window) Exec(com Com) {
 	win.coms <- com
+}
+
+func (win *Window) SetController(c Controller) {
+	win.con = c
+}
+
+type Controller interface {
+	Resize()
 }
 
 func InitTerminalLoop() (root *Window, quit chan struct{}, outgoingUserInput chan byte) {
@@ -276,15 +306,32 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, outgoingUserInput cha
 
 	outgoingUserInput = make(chan byte)
 	quitChan := make(chan struct{})
-	commands := make(chan Com, 32)
+	commands := make(chan Com)
 	dimensions := make(chan int)
 	go terminalLoop(oldState, commands, inChan, outgoingUserInput, dimensions, quitChan)
 
 	//define root window
 	GetDimensions := GetWindowDimensionsFunc(commands, dimensions)
 	w, h := GetDimensions()
-	root = &Window{nil, []*Window{}, Box{1, 1, uint(w), uint(h)}, commands}
+	root = &Window{nil, []*Window{}, Box{1, 1, uint(w), uint(h)}, commands, nil}
 
+	//resize loop
+	go func() {
+		curW, curH := GetDimensions()
+		resizeClock := time.NewTicker(100 * time.Millisecond)
+
+		for {
+			<-resizeClock.C
+			w, h := GetDimensions()
+
+			if w != curW || h != curH {
+				commands <- "\x1b[2J\x1b[3J\x1b[H"
+				curW, curH = w, h
+				root.Resize(Box{1, 1, uint(curW), uint(curH)})
+			}
+		}
+	}()
+	root.GetOffsetComBuilder().Clear().Exec()
 	return root, quitChan, outgoingUserInput
 }
 
@@ -326,13 +373,12 @@ func terminalLoop(oldState *term.State, commandChan <-chan Com, userInputChan <-
 				outgoingUserInputChan <- in
 			}
 		}
-
 	}
 }
 
 func endTerminalLoop(oldState *term.State) {
 	//clear screen
-	fmt.Printf("%c[2J", ESC)
+	fmt.Printf("%c[H%c[J", ESC, ESC)
 	//move to 1,1
 	fmt.Printf("%c[1;1H", ESC)
 	//reset
@@ -353,11 +399,10 @@ func inputLoop(input chan byte) {
 
 func GetWindowDimensionsFunc(comChan chan<- Com, dimChan <-chan int) func() (int, int) {
 	return func() (w int, h int) {
-		comChan <- "\x1b[2J\x1b[999C\x1b[999B\x1b[6n"
+		comChan <- "\x1b[999;999H\x1b[6n\x1b[0;0H"
 		w = <-dimChan
 		h = <-dimChan
 
-		fmt.Print("\x1b[0;0H")
 		return w, h
 	}
 }
