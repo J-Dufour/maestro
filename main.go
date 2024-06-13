@@ -15,6 +15,7 @@ const (
 	KEY_QUIT   = 'q'
 	KEY_SKIP   = 'k'
 	KEY_TOGGLE = ' '
+	KEY_BACK   = 'j'
 )
 
 func main() {
@@ -115,6 +116,8 @@ func inputDecoder(input chan byte, player *audio.Player) {
 			player.Skip()
 		case KEY_TOGGLE:
 			player.Toggle()
+		case KEY_BACK:
+			player.Back()
 		default:
 		}
 	}

@@ -71,6 +71,7 @@ const (
 
 	VT_BOOL   = 11
 	VT_UI4    = 19
+	VT_I8     = 20
 	VT_UI8    = 21
 	VT_LPWSTR = 31
 )
@@ -206,6 +207,14 @@ func (s MFSourceReader) GetMediaSource() (source *MFMediaSource, err error) {
 
 	source = &MFMediaSource{ptr: uintptr(unsafe.Pointer(mediaSourcePtr)), vtbl: *mediaSourcePtr}
 	return source, nil
+}
+
+func (s MFSourceReader) SetCurrentPosition(position *PropVariant) error {
+	r1, _, _ := syscall.SyscallN(s.vtbl.SetCurrentPosition, s.ptr, uintptr(unsafe.Pointer(&GUID_null)), uintptr(unsafe.Pointer(position)))
+	if uint32(r1) != uint32(windows.S_OK) {
+		return errors.New("could not set position")
+	}
+	return nil
 }
 
 type MFSample struct {

@@ -219,6 +219,12 @@ func (winSource *WinAudioSource) GetMetadata() Metadata {
 	return *winSource.metadata
 }
 
+func (winSource *WinAudioSource) SetPosition(pos int64) error {
+	// create propvariant
+	prop := &win32.PropVariant{PropType: win32.VT_I8, Data: uint64(pos)}
+	return winSource.reader.SetCurrentPosition(prop)
+}
+
 type WinAudioClient struct {
 	format   *win32.WaveFormatExtensible
 	client   *win32.AudioClient

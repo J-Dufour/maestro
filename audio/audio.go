@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const BACK_THRESHOLD = 2 * 1e7 // in 100ns units
+
 const (
 	EVENT_SOURCE_CHANGE = iota
 )
@@ -13,6 +15,7 @@ const (
 	CTL_PLAY = iota
 	CTL_PAUSE
 	CTL_SKIP
+	CTL_SEEK
 )
 
 const (
@@ -65,6 +68,8 @@ type AudioClient interface {
 
 type AudioSource interface {
 	ReadNext() ([]byte, int, error)
+	SetPosition(int64) error
+
 	SetPCMWaveFormat(*PCMWaveFormat) error
 	GetPCMWaveFormat() (*PCMWaveFormat, error)
 
@@ -152,6 +157,20 @@ func (p *Player) Skip() {
 
 }
 
+func (p *Player) Back() {
+	if p.trackPosition < BACK_THRESHOLD {
+		// skip backwards
+		p.control <- CTL_SKIP
+		p.control <- -1
+	} else {
+		// restart the song
+		p.control <- CTL_SEEK
+		p.control <- 0
+	}
+
+	<-p.controlDone
+}
+
 func (p *Player) AddSourcesToQueue(sources ...AudioSource) {
 	for _, source := range sources {
 		source.SetPCMWaveFormat(p.format)
@@ -231,6 +250,9 @@ func (player *Player) playerThread() {
 			player.queue = append(player.queue, source)
 			player.publishQueueUpdate()
 			if waitingForNextTrack {
+				if curSource != nil {
+					curSource.SetPosition(0)
+				}
 				curSource = player.queue[player.queueIdx]
 				player.publishSourceChange()
 				clock.Reset(CLK_DUR)
@@ -264,6 +286,7 @@ func (player *Player) playerThread() {
 					leftover = leftover[:0]
 					client.ClearBuffer()
 					// play next song
+					curSource.SetPosition(0)
 					curSource = player.queue[player.queueIdx]
 					clock.Reset(CLK_DUR)
 				} else {
@@ -272,7 +295,11 @@ func (player *Player) playerThread() {
 					clock.Stop()
 				}
 				player.controlDone <- struct{}{}
-
+			case CTL_SEEK:
+				curSource.SetPosition(int64(<-player.control))
+				client.ClearBuffer()
+				leftover = leftover[:0]
+				player.controlDone <- struct{}{}
 			}
 		case <-clock.C:
 			// Get buffer
@@ -291,6 +318,7 @@ func (player *Player) playerThread() {
 				// exit and move to next song
 				player.queueIdx++
 				if player.queueIdx < len(player.queue) {
+					curSource.SetPosition(0)
 					curSource = player.queue[player.queueIdx]
 				} else { //if no next song, wait.
 					waitingForNextTrack = true
