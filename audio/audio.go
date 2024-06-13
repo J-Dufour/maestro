@@ -252,7 +252,6 @@ func (player *Player) playerThread() {
 				}
 
 			}
-			client.ClearBuffer()
 		case <-clock.C:
 			// Get buffer
 			padding, err := client.GetBufferPadding()
