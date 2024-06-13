@@ -16,6 +16,8 @@ const (
 	KEY_SKIP   = 'k'
 	KEY_TOGGLE = ' '
 	KEY_BACK   = 'j'
+	KEY_SEEKF  = '.'
+	KEY_SEEKB  = ','
 )
 
 func main() {
@@ -118,6 +120,10 @@ func inputDecoder(input chan byte, player *audio.Player) {
 			player.Toggle()
 		case KEY_BACK:
 			player.Back()
+		case KEY_SEEKF:
+			player.SeekForward()
+		case KEY_SEEKB:
+			player.SeekBackward()
 		default:
 		}
 	}

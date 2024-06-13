@@ -5,7 +5,11 @@ import (
 	"time"
 )
 
-const BACK_THRESHOLD = 2 * 1e7 // in 100ns units
+const (
+	SECOND         = 1e7
+	BACK_THRESHOLD = 2 * SECOND // in 100ns units
+	SEEK_UNIT      = 5 * SECOND
+)
 
 const (
 	EVENT_SOURCE_CHANGE = iota
@@ -15,6 +19,7 @@ const (
 	CTL_PLAY = iota
 	CTL_PAUSE
 	CTL_SKIP
+	CTL_SEEK
 	CTL_SEEK_TO
 )
 
@@ -171,6 +176,18 @@ func (p *Player) Back() {
 	<-p.controlDone
 }
 
+func (p *Player) SeekForward() {
+	p.control <- CTL_SEEK
+	p.control <- SEEK_UNIT
+	<-p.controlDone
+}
+
+func (p *Player) SeekBackward() {
+	p.control <- CTL_SEEK
+	p.control <- -1 * SEEK_UNIT
+	<-p.controlDone
+}
+
 func (p *Player) AddSourcesToQueue(sources ...AudioSource) {
 	for _, source := range sources {
 		source.SetPCMWaveFormat(p.format)
@@ -305,6 +322,22 @@ func (player *Player) playerThread() {
 				}
 				player.publishSourceChange()
 				player.controlDone <- struct{}{}
+			case CTL_SEEK:
+				// find new position
+				amt := <-player.control
+				newPos := player.trackPosition + amt
+				newPos = Clamp(newPos, 0, int(curSource.GetMetadata().Duration))
+
+				// set new position
+				curSource.SetPosition(int64(newPos))
+				player.trackPosition = newPos
+
+				// clear buffer
+				player.client.ClearBuffer()
+				leftover = leftover[:0]
+
+				player.controlDone <- struct{}{}
+
 			case CTL_SEEK_TO:
 				curSource.SetPosition(int64(<-player.control))
 				client.ClearBuffer()
