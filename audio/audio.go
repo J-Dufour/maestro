@@ -15,7 +15,7 @@ const (
 	CTL_PLAY = iota
 	CTL_PAUSE
 	CTL_SKIP
-	CTL_SEEK
+	CTL_SEEK_TO
 )
 
 const (
@@ -164,7 +164,7 @@ func (p *Player) Back() {
 		p.control <- -1
 	} else {
 		// restart the song
-		p.control <- CTL_SEEK
+		p.control <- CTL_SEEK_TO
 		p.control <- 0
 	}
 
@@ -305,7 +305,7 @@ func (player *Player) playerThread() {
 				}
 				player.publishSourceChange()
 				player.controlDone <- struct{}{}
-			case CTL_SEEK:
+			case CTL_SEEK_TO:
 				curSource.SetPosition(int64(<-player.control))
 				client.ClearBuffer()
 				leftover = leftover[:0]
