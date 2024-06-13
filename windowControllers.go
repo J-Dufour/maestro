@@ -52,6 +52,13 @@ func NewQueueWindowController(w *Window) *QueueWindowController {
 }
 
 func (q *QueueWindowController) Resize() {
+	q.UpdateQueue(q.queue)
+}
+
+func (q *QueueWindowController) UpdateQueue(queue []audio.AudioSource) {
+	q.queue = queue
+
+	// grab dimensions
 	width, height := q.win.GetDimensions()
 	q.maxHeight = height
 
@@ -62,12 +69,6 @@ func (q *QueueWindowController) Resize() {
 	}
 
 	q.maxTitleLen = width - q.maxIdxLen - 2
-
-	q.UpdateQueue(q.queue)
-}
-
-func (q *QueueWindowController) UpdateQueue(queue []audio.AudioSource) {
-	q.queue = queue
 
 	// draw queue
 	builder := q.win.GetOffsetComBuilder()
