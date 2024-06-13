@@ -269,7 +269,7 @@ func StartPlayerWindowLoop(p *PlayerWindowController, player *audio.Player) {
 	player.SubscribeToSourceChange(songUpdated)
 
 	go func() {
-		period := 500 * time.Millisecond
+		period := 100 * time.Millisecond
 		clock := time.NewTicker(period)
 		for {
 			select {
