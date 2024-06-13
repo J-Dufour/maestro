@@ -12,8 +12,9 @@ import (
 var VALID_EXT = []string{".mp3", ".wav"}
 
 const (
-	KEY_QUIT = 'q'
-	KEY_SKIP = 'k'
+	KEY_QUIT   = 'q'
+	KEY_SKIP   = 'k'
+	KEY_TOGGLE = ' '
 )
 
 func main() {
@@ -112,6 +113,8 @@ func inputDecoder(input chan byte, player *audio.Player) {
 		switch key {
 		case KEY_SKIP:
 			player.Skip()
+		case KEY_TOGGLE:
+			player.Toggle()
 		default:
 		}
 	}

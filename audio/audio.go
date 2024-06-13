@@ -79,7 +79,9 @@ type Player struct {
 	client AudioClient
 	format *PCMWaveFormat
 
-	control chan int
+	control     chan int
+	controlDone chan struct{}
+	playing     bool
 
 	trackPosition int // in 100ns units
 
@@ -102,7 +104,10 @@ func GetAudioSourceProvider() *AudioSourceProvider {
 func NewPlayer() (player *Player, err error) {
 	player = &Player{}
 
-	player.control = make(chan int, 16)
+	player.control = make(chan int)
+	player.controlDone = make(chan struct{})
+	player.playing = false
+
 	player.queueIn = make(chan AudioSource, 2)
 	player.queue = make([]AudioSource, 0)
 	player.queueIdx = 0
@@ -124,15 +129,26 @@ func NewPlayer() (player *Player, err error) {
 
 func (p *Player) Start() {
 	p.control <- CTL_PLAY
+	<-p.controlDone
 }
 
 func (p *Player) Stop() {
 	p.control <- CTL_PAUSE
+	<-p.controlDone
+}
+
+func (p *Player) Toggle() {
+	if p.playing {
+		p.Stop()
+	} else {
+		p.Start()
+	}
 }
 
 func (p *Player) Skip() {
 	p.control <- CTL_SKIP
 	p.control <- 1
+	<-p.controlDone
 
 }
 
@@ -224,13 +240,18 @@ func (player *Player) playerThread() {
 			switch op {
 			case CTL_PLAY:
 				client.Start()
+				player.playing = true
+				player.controlDone <- struct{}{}
 			case CTL_PAUSE:
 				client.Stop()
+				player.playing = false
+				player.controlDone <- struct{}{}
 			case CTL_SKIP:
 				//grab exra data
 				amt := <-player.control
 
 				if amt == 0 || player.queueIdx >= len(player.queue) { //if skipping 0 songs, or if index is already waiting, skip
+					player.controlDone <- struct{}{}
 					break
 				}
 				player.queueIdx += amt
@@ -250,6 +271,7 @@ func (player *Player) playerThread() {
 					waitingForNextTrack = true
 					clock.Stop()
 				}
+				player.controlDone <- struct{}{}
 
 			}
 		case <-clock.C:
@@ -306,9 +328,10 @@ func (player *Player) playerThread() {
 				totalCopied += copied
 				lastKnownTS = timestamp + len(frames)*bytesTo100ns
 			}
-
-			//load into buffer
-			client.LoadToBuffer(acc[:totalCopied])
+			if totalCopied > 0 {
+				//load into buffer
+				client.LoadToBuffer(acc[:totalCopied])
+			}
 
 		}
 	}
