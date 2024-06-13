@@ -254,6 +254,10 @@ func (player *Player) playerThread() {
 					curSource.SetPosition(0)
 				}
 				curSource = player.queue[player.queueIdx]
+
+				player.trackPosition = 0
+				lastKnownTS = 0
+
 				player.publishSourceChange()
 				clock.Reset(CLK_DUR)
 				waitingForNextTrack = false
@@ -278,22 +282,28 @@ func (player *Player) playerThread() {
 				}
 				player.queueIdx += amt
 				player.queueIdx = Clamp(player.queueIdx, 0, len(player.queue))
-				player.publishSourceChange()
+
+				// interrupt current song
+				leftover = leftover[:0]
+				client.ClearBuffer()
 				if player.queueIdx < len(player.queue) {
 					waitingForNextTrack = false
-
-					// interrupt current song
-					leftover = leftover[:0]
-					client.ClearBuffer()
 					// play next song
 					curSource.SetPosition(0)
 					curSource = player.queue[player.queueIdx]
+
+					player.trackPosition = 0
+					lastKnownTS = 0
+
 					clock.Reset(CLK_DUR)
 				} else {
 					// wait for next song
+					curSource.SetPosition(int64(curSource.GetMetadata().Duration))
+					player.trackPosition = int(curSource.GetMetadata().Duration)
 					waitingForNextTrack = true
 					clock.Stop()
 				}
+				player.publishSourceChange()
 				player.controlDone <- struct{}{}
 			case CTL_SEEK:
 				curSource.SetPosition(int64(<-player.control))
@@ -320,6 +330,8 @@ func (player *Player) playerThread() {
 				if player.queueIdx < len(player.queue) {
 					curSource.SetPosition(0)
 					curSource = player.queue[player.queueIdx]
+					player.trackPosition = 0
+					lastKnownTS = 0
 				} else { //if no next song, wait.
 					waitingForNextTrack = true
 					clock.Stop()
