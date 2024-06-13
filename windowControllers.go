@@ -268,7 +268,9 @@ func StartPlayerWindowLoop(p *PlayerWindowController, player *audio.Player) {
 		for {
 			select {
 			case <-songUpdated:
-				p.SetNewMetadata(player.GetQueue()[player.GetPositionInQueue()].GetMetadata())
+				if idx := player.GetPositionInQueue(); idx < len(player.GetQueue()) {
+					p.SetNewMetadata(player.GetQueue()[idx].GetMetadata())
+				}
 				p.SetTrackPosition(int64(player.GetPositionInTrack()))
 			case <-clock.C:
 				p.SetTrackPosition(int64(player.GetPositionInTrack()))
