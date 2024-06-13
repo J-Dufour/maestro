@@ -240,10 +240,15 @@ func centeredString(str string, width int) string {
 
 func (p *PlayerWindowController) SetTrackPosition(pos int64) {
 	duration := p.metadata.Duration
-	ratio := float64(pos) / float64(duration)
-	realPos := int(ratio * float64(p.w))
-	if realPos > p.w-1 {
-		realPos = p.w - 1
+	var realPos int
+	if duration == 0 {
+		realPos = 0
+	} else {
+		ratio := float64(pos) / float64(duration)
+		realPos = int(ratio * float64(p.w))
+		if realPos > p.w-1 {
+			realPos = p.w - 1
+		}
 	}
 	var cursor rune
 	switch realPos {
