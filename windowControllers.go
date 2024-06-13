@@ -97,7 +97,7 @@ func (q *QueueWindowController) getQueueLine(idx int, metadata audio.Metadata) s
 }
 
 func (q *QueueWindowController) Highlight(idx int) {
-	if q.sourceIdx == 0 {
+	if q.sourceIdx >= len(q.queue) {
 		return
 	}
 	//un-highlight previous
