@@ -303,6 +303,40 @@ func (win *Window) SetController(c Controller) {
 	win.con = c
 }
 
+func (win *Window) NewInnerChild(levels int) (child *Window) {
+	childBox := Box{uint(levels), uint(levels), win.w - uint(2*levels), win.h - uint(2*levels)}
+	child = win.NewChild(childBox)
+	return child
+}
+
+func (win *Window) HSplit() (left *Window, right *Window) {
+	halfW := win.w / 2
+	LBox := Box{0, 0, halfW, win.h}
+	RBox := Box{halfW, 0, win.w - halfW, win.h}
+
+	left = win.NewChild(LBox)
+	right = win.NewChild(RBox)
+	return left, right
+}
+
+func (win *Window) VSplit() (top *Window, bottom *Window) {
+	halfH := win.h / 2
+	TBox := Box{0, 0, win.w, halfH}
+	BBox := Box{0, halfH, win.w, win.h - halfH}
+
+	top = win.NewChild(TBox)
+	bottom = win.NewChild(BBox)
+	return top, bottom
+}
+
+func (win *Window) GetRoot() *Window {
+	if win.parent == nil {
+		return win
+	} else {
+		return win.parent.GetRoot()
+	}
+}
+
 type Controller interface {
 	Resize()
 }

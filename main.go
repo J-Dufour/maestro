@@ -75,19 +75,19 @@ func main() {
 	// start input interpreter
 	go inputDecoder(input, player)
 
-	// make queue view
-	outerQueueWin := root.NewChild(Box{0, 0, 40, 14})
-	NewOuterWindowController(outerQueueWin, " Queue ")
-	innerQueueWin := outerQueueWin.NewChild(Box{1, 1, 38, 12})
+	// split
+	top, _ := root.VSplit()
+	outerQWin, outerPWin := top.HSplit()
 
+	// make queue view
+	NewOuterWindowController(outerQWin, " Queue ")
+	innerQueueWin := outerQWin.NewInnerChild(1)
 	Qcontroller := NewQueueWindowController(innerQueueWin)
 	StartQueueWindowLoop(Qcontroller, player)
 
 	// make player view
-	outerPlayerWin := root.NewChild(Box{41, 0, 40, 14})
-	NewOuterWindowController(outerPlayerWin, " Player ")
-	innerPlayerWin := outerPlayerWin.NewChild(Box{1, 1, 38, 12})
-
+	NewOuterWindowController(outerPWin, " Player ")
+	innerPlayerWin := outerPWin.NewInnerChild(1)
 	Pcontroller := NewPlayerWindowController(innerPlayerWin)
 	StartPlayerWindowLoop(Pcontroller, player)
 
