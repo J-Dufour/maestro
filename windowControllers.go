@@ -31,7 +31,7 @@ func (o *OuterWindowController) Resize() {
 type QueueWindowController struct {
 	win *Window
 
-	queue     []audio.AudioSource
+	queue     []audio.Metadata
 	sourceIdx int
 
 	maxTitleLen int
@@ -43,7 +43,7 @@ func NewQueueWindowController(w *Window) *QueueWindowController {
 	controller := &QueueWindowController{}
 	controller.win = w
 	controller.win.SetController(controller)
-	controller.queue = make([]audio.AudioSource, 0)
+	controller.queue = make([]audio.Metadata, 0)
 	controller.sourceIdx = 0
 
 	controller.Resize()
@@ -55,7 +55,7 @@ func (q *QueueWindowController) Resize() {
 	q.UpdateQueue(q.queue)
 }
 
-func (q *QueueWindowController) UpdateQueue(queue []audio.AudioSource) {
+func (q *QueueWindowController) UpdateQueue(queue []audio.Metadata) {
 	q.queue = queue
 
 	// grab dimensions
@@ -76,7 +76,7 @@ func (q *QueueWindowController) UpdateQueue(queue []audio.AudioSource) {
 		if i >= q.maxHeight {
 			break
 		}
-		builder.Write(q.getQueueLine(i+1, source.GetMetadata())).MoveLines(1)
+		builder.Write(q.getQueueLine(i+1, source)).MoveLines(1)
 	}
 	builder.Exec()
 
@@ -102,7 +102,7 @@ func (q *QueueWindowController) Highlight(idx int) {
 		return
 	}
 	//un-highlight previous
-	metadata := q.queue[q.sourceIdx].GetMetadata()
+	metadata := q.queue[q.sourceIdx]
 	builder := q.win.GetOffsetComBuilder()
 	builder.MoveLines(q.sourceIdx).SelectGraphicsRendition(POSITIVE).Write(q.getQueueLine(q.sourceIdx+1, metadata))
 
@@ -111,7 +111,7 @@ func (q *QueueWindowController) Highlight(idx int) {
 		return
 	}
 
-	metadata = q.queue[q.sourceIdx].GetMetadata()
+	metadata = q.queue[q.sourceIdx]
 	builder.MoveTo(1, uint(q.sourceIdx+1)).SelectGraphicsRendition(NEGATIVE).Write(q.getQueueLine(q.sourceIdx+1, metadata)).ClearGraphicsRendition()
 	builder.Exec()
 }
@@ -275,7 +275,7 @@ func StartPlayerWindowLoop(p *PlayerWindowController, player *audio.Player) {
 			select {
 			case <-songUpdated:
 				if idx := player.GetPositionInQueue(); idx < len(player.GetQueue()) {
-					p.SetNewMetadata(player.GetQueue()[idx].GetMetadata())
+					p.SetNewMetadata(player.GetQueue()[idx])
 				}
 				p.SetTrackPosition(int64(player.GetPositionInTrack()))
 			case <-clock.C:

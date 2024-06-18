@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"errors"
 	"io"
 	"time"
 )
@@ -95,9 +96,8 @@ type Player struct {
 
 	trackPosition int // in 100ns units
 
-	queueIn  chan AudioSource
-	queue    []AudioSource
-	queueIdx int
+	queueIn chan string
+	queue   Queue
 
 	sourceChangeSubscribers []chan<- struct{}
 	queueUpdateSubscribers  []chan<- struct{}
@@ -118,9 +118,8 @@ func NewPlayer() (player *Player, err error) {
 	player.controlDone = make(chan struct{})
 	player.playing = false
 
-	player.queueIn = make(chan AudioSource, 2)
-	player.queue = make([]AudioSource, 0)
-	player.queueIdx = 0
+	player.queueIn = make(chan string, 2)
+	player.queue = Queue{make([]QueueItem, 0), -1}
 
 	player.queueUpdateSubscribers = make([]chan<- struct{}, 0)
 	player.sourceChangeSubscribers = make([]chan<- struct{}, 0)
@@ -188,19 +187,18 @@ func (p *Player) SeekBackward() {
 	<-p.controlDone
 }
 
-func (p *Player) AddSourcesToQueue(sources ...AudioSource) {
+func (p *Player) AddSourcesToQueue(sources ...string) {
 	for _, source := range sources {
-		source.SetPCMWaveFormat(p.format)
 		p.queueIn <- source
 	}
 }
 
-func (p *Player) GetQueue() []AudioSource {
-	return append(make([]AudioSource, 0, len(p.queue)), p.queue...)
+func (p *Player) GetQueue() []Metadata {
+	return p.queue.GetDataQueue()
 }
 
 func (p *Player) GetPositionInQueue() int {
-	return p.queueIdx
+	return p.queue.idx
 }
 
 func (p *Player) GetPositionInTrack() int {
@@ -264,20 +262,19 @@ func (player *Player) playerThread() {
 	for {
 		select {
 		case source := <-player.queueIn:
-			player.queue = append(player.queue, source)
+			player.queue.AddSourcePath(source, player.format)
 			player.publishQueueUpdate()
 			if waitingForNextTrack {
-				if curSource != nil {
-					curSource.SetPosition(0)
+				curSource, waitingForNextTrack = player.queue.NextSource()
+				if waitingForNextTrack {
+					break
 				}
-				curSource = player.queue[player.queueIdx]
 
 				player.trackPosition = 0
 				lastKnownTS = 0
 
 				player.publishSourceChange()
 				clock.Reset(CLK_DUR)
-				waitingForNextTrack = false
 			}
 		case op := <-player.control:
 			switch op {
@@ -293,33 +290,31 @@ func (player *Player) playerThread() {
 				//grab exra data
 				amt := <-player.control
 
-				if amt == 0 || player.queueIdx >= len(player.queue) { //if skipping 0 songs, or if index is already waiting, skip
+				if amt == 0 { //if skipping 0 songs, or if index is already waiting, skip
 					player.controlDone <- struct{}{}
 					break
 				}
-				player.queueIdx += amt
-				player.queueIdx = Clamp(player.queueIdx, 0, len(player.queue))
+
+				player.queue.SkipIdx(amt)
 
 				// interrupt current song
 				leftover = leftover[:0]
 				client.ClearBuffer()
-				if player.queueIdx < len(player.queue) {
-					waitingForNextTrack = false
-					// play next song
-					curSource.SetPosition(0)
-					curSource = player.queue[player.queueIdx]
 
-					player.trackPosition = 0
-					lastKnownTS = 0
+				curSource.SetPosition(0)
+				curSource, waitingForNextTrack = player.queue.NextSource()
 
-					clock.Reset(CLK_DUR)
-				} else {
-					// wait for next song
+				if waitingForNextTrack {
 					curSource.SetPosition(int64(curSource.GetMetadata().Duration))
 					player.trackPosition = int(curSource.GetMetadata().Duration)
-					waitingForNextTrack = true
 					clock.Stop()
+				} else {
+					// play next song
+					player.trackPosition = 0
+					lastKnownTS = 0
+					clock.Reset(CLK_DUR)
 				}
+
 				player.publishSourceChange()
 				player.controlDone <- struct{}{}
 			case CTL_SEEK:
@@ -358,22 +353,19 @@ func (player *Player) playerThread() {
 
 			if reachedEOF && player.trackPosition == lastKnownTS { //if song is done
 				reachedEOF = false
+
 				// exit and move to next song
-				player.queueIdx++
-				if player.queueIdx < len(player.queue) {
-					curSource.SetPosition(0)
-					curSource = player.queue[player.queueIdx]
-					player.trackPosition = 0
-					lastKnownTS = 0
-				} else { //if no next song, wait.
-					waitingForNextTrack = true
+				curSource.SetPosition(0)
+				curSource, waitingForNextTrack = player.queue.NextSource()
+
+				player.trackPosition = 0
+				lastKnownTS = 0
+				if waitingForNextTrack {
 					clock.Stop()
 					player.publishSourceChange()
 					break
 				}
-				lastKnownTS = 0
 				player.publishSourceChange()
-
 			}
 
 			freeFrames := bufferFrames - padding
@@ -408,6 +400,82 @@ func (player *Player) playerThread() {
 
 		}
 	}
+}
+
+type Queue struct {
+	queue []QueueItem
+	idx   int
+}
+
+func (q *Queue) AddSourcePath(path string, format *PCMWaveFormat) {
+	metadata, err := WinGetFileMetadata(path)
+	if err != nil {
+		metadata := NewMetadata()
+		metadata.Filepath = path
+	}
+	q.queue = append(q.queue, QueueItem{*metadata, format, nil})
+}
+
+func (q *Queue) NextSource() (s AudioSource, endOfQueue bool) {
+	// find next valid source
+	err := errors.New("test")
+	var source AudioSource
+	for err != nil && q.idx < len(q.queue) {
+		q.idx++
+		source, err = q.queue[q.idx].Source()
+	}
+	if q.idx == len(q.queue) {
+		return nil, true
+	}
+	return source, false
+}
+
+// moves idx such that the next song is [amt] away from current song
+func (q *Queue) SkipIdx(amt int) {
+	q.idx = Clamp(q.idx+amt-1, -1, len(q.queue))
+}
+
+func (q *Queue) GetDataQueue() []Metadata {
+	out := make([]Metadata, len(q.queue))
+	for i, item := range q.queue {
+		out[i] = item.metadata
+	}
+
+	return out
+}
+
+type QueueItem struct {
+	metadata Metadata
+	format   *PCMWaveFormat
+	source   AudioSource
+}
+
+func (i *QueueItem) Source() (AudioSource, error) {
+	if i.source == nil {
+		err := i.loadSource()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return i.source, nil
+}
+
+func (i *QueueItem) loadSource() error {
+	s, err := GetAudioSourceProvider().GetAudioSourceFromFile(i.metadata.Filepath)
+	if err != nil {
+		return err
+	}
+
+	if i.format != nil {
+		err = s.SetPCMWaveFormat(i.format)
+		if err != nil {
+			return err
+		}
+	}
+
+	i.source = s
+	return nil
 }
 
 func Clamp(x int, min int, max int) int {

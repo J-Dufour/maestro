@@ -63,20 +63,6 @@ func main() {
 
 	}
 
-	// get file reader
-	sourceProvider := audio.GetAudioSourceProvider()
-
-	sources := make([]audio.AudioSource, 0)
-	for _, fileName := range absolutePaths {
-		source, err := sourceProvider.GetAudioSourceFromFile(fileName)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		sources = append(sources, source)
-	}
-
 	player, err := audio.NewPlayer()
 	if err != nil {
 		fmt.Println(err)
@@ -105,7 +91,7 @@ func main() {
 	Pcontroller := NewPlayerWindowController(innerPlayerWin)
 	StartPlayerWindowLoop(Pcontroller, player)
 
-	player.AddSourcesToQueue(sources...)
+	player.AddSourcesToQueue(absolutePaths...)
 	player.Start()
 
 	<-done

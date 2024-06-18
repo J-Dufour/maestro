@@ -102,6 +102,19 @@ func getWinAudioSourceProvider() *AudioSourceProvider {
 	}
 }
 
+func WinGetFileMetadata(path string) (*Metadata, error) {
+	out := &Metadata{}
+	out.Filepath = path
+
+	propStore, err := win32.GetPropertyStoreFromParsingName(path)
+	if err != nil {
+		return nil, err
+	}
+
+	loadPropStoreToMetadata(propStore, out)
+	return out, nil
+}
+
 func createWinAudioSourceFromFile(path string) (AudioSource, error) {
 	sourceReader, err := win32.CreateSourceReaderFromFile(path)
 	if err != nil {
@@ -109,7 +122,6 @@ func createWinAudioSourceFromFile(path string) (AudioSource, error) {
 	}
 	metadata := NewMetadata()
 	metadata.Filepath = path
-	// grab metadata
 
 	// get media source
 	mediaSource, err := sourceReader.GetMediaSource()
@@ -124,6 +136,12 @@ func createWinAudioSourceFromFile(path string) (AudioSource, error) {
 	}
 
 	// get metadata
+	loadPropStoreToMetadata(propStore, metadata)
+
+	return &WinAudioSource{metadata, sourceReader}, nil
+}
+
+func loadPropStoreToMetadata(propStore *win32.PropertyStore, metadata *Metadata) {
 	title, err := propStore.GetValue(&win32.PKEY_Title)
 	if err == nil {
 		metadata.Title = decodeValue(title).(string)
@@ -134,17 +152,19 @@ func createWinAudioSourceFromFile(path string) (AudioSource, error) {
 		metadata.Album = decodeValue(album).(string)
 	}
 
-	artist, err := propStore.GetValue(&win32.PKEY_Music_Artist)
+	artist, err := propStore.GetValue(&win32.PKEY_Music_DisplayArtist)
 	if err == nil {
-		metadata.Artist = decodeValue(artist).(string)
+
+		if val := decodeValue(artist); val != nil {
+			metadata.Artist = val.(string)
+		}
+
 	}
 
 	duration, err := propStore.GetValue(&win32.PKEY_Media_Duration)
 	if err == nil {
 		metadata.Duration = decodeValue(duration).(uint64)
 	}
-
-	return &WinAudioSource{metadata, sourceReader}, nil
 }
 
 func decodeValue(val win32.PropVariant) any {
