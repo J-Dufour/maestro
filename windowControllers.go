@@ -15,11 +15,15 @@ type OuterWindowController struct {
 	title string
 }
 
-func NewOuterWindowController(w *Window, title string) *OuterWindowController {
-	out := &OuterWindowController{w, title}
-	out.win.SetController(out)
-	out.Resize()
-	return out
+func OuterWindowControllerFunc(title string, innerController func(*Window) Controller) func(*Window) Controller {
+	return func(w *Window) Controller {
+		out := &OuterWindowController{w, title}
+		out.Resize()
+
+		inner := w.NewInnerChild(1)
+		inner.SetController(innerController)
+		return out
+	}
 }
 
 func (o *OuterWindowController) Resize() {
@@ -39,16 +43,19 @@ type QueueWindowController struct {
 	maxHeight   int
 }
 
-func NewQueueWindowController(w *Window) *QueueWindowController {
-	controller := &QueueWindowController{}
-	controller.win = w
-	controller.win.SetController(controller)
-	controller.queue = make([]audio.Metadata, 0)
-	controller.sourceIdx = 0
+func QueueWindowControllerFunc(player *audio.Player) func(*Window) Controller {
+	return OuterWindowControllerFunc(" Queue ",
+		func(w *Window) Controller {
+			controller := &QueueWindowController{}
+			controller.win = w
+			controller.queue = make([]audio.Metadata, 0)
+			controller.sourceIdx = 0
 
-	controller.Resize()
+			controller.Resize()
 
-	return controller
+			controller.startQueueWindowLoop(player)
+			return controller
+		})
 }
 
 func (q *QueueWindowController) Resize() {
@@ -116,7 +123,7 @@ func (q *QueueWindowController) Highlight(idx int) {
 	builder.Exec()
 }
 
-func StartQueueWindowLoop(con *QueueWindowController, player *audio.Player) {
+func (q *QueueWindowController) startQueueWindowLoop(player *audio.Player) {
 	queueUpdated := make(chan struct{})
 	songUpdated := make(chan struct{})
 
@@ -128,10 +135,10 @@ func StartQueueWindowLoop(con *QueueWindowController, player *audio.Player) {
 			select {
 			case <-queueUpdated:
 				// redraw queue
-				con.UpdateQueue(player.GetQueue())
+				q.UpdateQueue(player.GetQueue())
 			case <-songUpdated:
 				// clear previous
-				con.Highlight(player.GetPositionInQueue())
+				q.Highlight(player.GetPositionInQueue())
 			}
 		}
 	}()
@@ -159,12 +166,16 @@ const (
 	CURSOR_END   = '┨'
 )
 
-func NewPlayerWindowController(win *Window) *PlayerWindowController {
-	controller := &PlayerWindowController{win, *audio.NewMetadata(), []int{}, 1, 0, 0}
-	controller.win.SetController(controller)
-	controller.Resize()
+func PlayerWindowControllerFunc(player *audio.Player) func(*Window) Controller {
+	return OuterWindowControllerFunc(" Player ", func(w *Window) Controller {
+		controller := &PlayerWindowController{w, *audio.NewMetadata(), []int{}, 1, 0, 0}
+		controller.Resize()
 
-	return controller
+		controller.startPlayerWindowLoop(player)
+
+		return controller
+	})
+
 }
 
 func (p *PlayerWindowController) Resize() {
@@ -264,7 +275,7 @@ func (p *PlayerWindowController) SetTrackPosition(pos int64) {
 	p.win.GetOffsetComBuilder().MoveTo(1, uint(p.trackLine)).Write(LINE_START, strings.Repeat(string(LINE_MID), p.w-2), LINE_END).MoveTo(uint(realPos)+1, uint(p.trackLine)).Write(cursor).Exec()
 }
 
-func StartPlayerWindowLoop(p *PlayerWindowController, player *audio.Player) {
+func (p *PlayerWindowController) startPlayerWindowLoop(player *audio.Player) {
 	songUpdated := make(chan struct{})
 	player.SubscribeToSourceChange(songUpdated)
 

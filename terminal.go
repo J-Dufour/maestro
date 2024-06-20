@@ -299,8 +299,8 @@ func (win *Window) Exec(com Com) {
 	win.coms <- com
 }
 
-func (win *Window) SetController(c Controller) {
-	win.con = c
+func (win *Window) SetController(c func(*Window) Controller) {
+	win.con = c(win)
 }
 
 func (win *Window) NewInnerChild(levels int) (child *Window) {

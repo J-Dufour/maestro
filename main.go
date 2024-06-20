@@ -80,16 +80,10 @@ func main() {
 	outerQWin, outerPWin := top.HSplit()
 
 	// make queue view
-	NewOuterWindowController(outerQWin, " Queue ")
-	innerQueueWin := outerQWin.NewInnerChild(1)
-	Qcontroller := NewQueueWindowController(innerQueueWin)
-	StartQueueWindowLoop(Qcontroller, player)
+	outerQWin.SetController(QueueWindowControllerFunc(player))
 
 	// make player view
-	NewOuterWindowController(outerPWin, " Player ")
-	innerPlayerWin := outerPWin.NewInnerChild(1)
-	Pcontroller := NewPlayerWindowController(innerPlayerWin)
-	StartPlayerWindowLoop(Pcontroller, player)
+	outerPWin.SetController(PlayerWindowControllerFunc(player))
 
 	player.AddSourcesToQueue(absolutePaths...)
 	player.Start()
