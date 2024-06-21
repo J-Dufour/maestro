@@ -70,14 +70,14 @@ func main() {
 	}
 
 	// start UI
-	root, done, input := InitTerminalLoop()
+	outerPWin, done, input := InitTerminalLoop()
 
 	// start input interpreter
 	go inputDecoder(input, player)
 
 	// split
-	top, _ := root.VSplit()
-	outerQWin, outerPWin := top.HSplit()
+	outerPWin.VSplit()
+	outerQWin := outerPWin.HSplit()
 
 	// make queue view
 	outerQWin.SetController(QueueWindowControllerFunc(player))

@@ -309,24 +309,48 @@ func (win *Window) NewInnerChild(levels int) (child *Window) {
 	return child
 }
 
-func (win *Window) HSplit() (left *Window, right *Window) {
+func (win *Window) HSplit() (sibling *Window) {
 	halfW := win.w / 2
-	LBox := Box{0, 0, halfW, win.h}
-	RBox := Box{halfW, 0, win.w - halfW, win.h}
+	// create parent
+	parent := &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, float64(halfW) / float64(win.w), 1}}, win.Box, win.coms, nil}
 
-	left = win.NewChild(LBox)
-	right = win.NewChild(RBox)
-	return left, right
+	if win.parent == nil {
+		win.x, win.y = 0, 0
+	}
+
+	win.parent = parent
+
+	// shrink
+	win.w = halfW
+
+	// create sibling
+	sibBox := Box{halfW, 0, parent.w - halfW, win.h}
+
+	sibling = parent.NewChild(sibBox)
+
+	return sibling
 }
 
-func (win *Window) VSplit() (top *Window, bottom *Window) {
+func (win *Window) VSplit() (sibling *Window) {
 	halfH := win.h / 2
-	TBox := Box{0, 0, win.w, halfH}
-	BBox := Box{0, halfH, win.w, win.h - halfH}
+	// create parent
+	parent := &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, 1, float64(halfH) / float64(win.h)}}, win.Box, win.coms, nil}
 
-	top = win.NewChild(TBox)
-	bottom = win.NewChild(BBox)
-	return top, bottom
+	if win.parent == nil {
+		win.x, win.y = 0, 0
+	}
+
+	win.parent = parent
+
+	// shrink
+	win.h = halfH
+
+	// create sibling
+	sibBox := Box{0, halfH, win.w, parent.h - halfH}
+
+	sibling = parent.NewChild(sibBox)
+
+	return sibling
 }
 
 func (win *Window) GetRoot() *Window {
