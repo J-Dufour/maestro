@@ -46,6 +46,10 @@ func (o *OuterWindowController) Deselect() {
 	o.Resize()
 }
 
+func (o *OuterWindowController) GetInputFilter() func(byte) bool {
+	return nil
+}
+
 type QueueWindowController struct {
 	win *Window
 
@@ -78,6 +82,8 @@ func (q *QueueWindowController) Resize() {
 
 func (q *QueueWindowController) Select()   {}
 func (q *QueueWindowController) Deselect() {}
+
+func (q *QueueWindowController) GetInputFilter() func(byte) bool { return nil }
 
 func (q *QueueWindowController) UpdateQueue(queue []audio.Metadata) {
 	q.queue = queue
@@ -195,8 +201,9 @@ func PlayerWindowControllerFunc(player *audio.Player) func(*Window) Controller {
 
 }
 
-func (q *PlayerWindowController) Select()   {}
-func (q *PlayerWindowController) Deselect() {}
+func (p *PlayerWindowController) Select()                         {}
+func (p *PlayerWindowController) Deselect()                       {}
+func (p *PlayerWindowController) GetInputFilter() func(byte) bool { return nil }
 
 func (p *PlayerWindowController) Resize() {
 	p.w, p.h = p.win.GetDimensions()

@@ -228,11 +228,12 @@ type Window struct {
 	coms chan Com
 	con  Controller
 
-	input  chan byte
-	output chan byte
+	inputFilter func(byte) bool
 
 	selectable bool
 }
+
+var NO_FILTER = func(b byte) bool { return false }
 
 func (win *Window) GetDimensions() (w int, h int) {
 	return int(win.w), int(win.h)
@@ -260,7 +261,7 @@ func (win *Window) NewChild(box Box, selectable bool) (child *Window) {
 		}
 	}
 
-	child = &Window{win, []*Window{}, []FloatBox{}, box, win.coms, nil, win.input, win.input, selectable}
+	child = &Window{win, []*Window{}, []FloatBox{}, box, win.coms, nil, NO_FILTER, selectable}
 	win.children = append(win.children, child)
 
 	// calculate relative dimensions
@@ -313,6 +314,10 @@ func (win *Window) Exec(com Com) {
 
 func (win *Window) SetController(c func(*Window) Controller) {
 	win.con = c(win)
+
+	if filter := win.con.GetInputFilter(); filter != nil {
+		win.inputFilter = filter
+	}
 }
 
 func (win *Window) NewInnerChild(levels int, canSelect bool) (child *Window) {
@@ -326,7 +331,7 @@ func (win *Window) HSplit() (sibling *Window) {
 	// create parent
 	var parent *Window
 	if win.parent == nil {
-		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, float64(halfW) / float64(win.w), 1}}, win.Box, win.coms, nil, win.output, win.output, false}
+		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, float64(halfW) / float64(win.w), 1}}, win.Box, win.coms, nil, NO_FILTER, false}
 		win.x, win.y = 0, 0
 	} else {
 		var err error
@@ -356,7 +361,7 @@ func (win *Window) VSplit() (sibling *Window) {
 	// create parent
 	var parent *Window
 	if win.parent == nil {
-		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, 1, float64(halfH) / float64(win.h)}}, win.Box, win.coms, nil, win.output, win.output, false}
+		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, 1, float64(halfH) / float64(win.h)}}, win.Box, win.coms, nil, NO_FILTER, false}
 		win.x, win.y = 0, 0
 	} else {
 		var err error
@@ -384,7 +389,7 @@ func (win *Window) createIntermediateChild(old *Window) (new *Window, err error)
 
 	for i, child := range win.children {
 		if old == child {
-			new = &Window{win, []*Window{old}, []FloatBox{{0, 0, 1, 1}}, old.Box, old.coms, nil, win.input, win.input, false}
+			new = &Window{win, []*Window{old}, []FloatBox{{0, 0, 1, 1}}, old.Box, old.coms, nil, NO_FILTER, false}
 			win.children[i] = new
 			return new, nil
 		}
@@ -412,10 +417,18 @@ func (win *Window) Deselect() {
 	}
 }
 
+func (win *Window) ResolveInput(b byte) {
+	if win.inputFilter == nil || !win.inputFilter(b) {
+		win.parent.ResolveInput(b)
+	}
+}
+
 type Controller interface {
 	Select()
 	Deselect()
 	Resize()
+
+	GetInputFilter() func(byte) bool
 }
 
 type WindowVisitor struct {
@@ -461,7 +474,7 @@ func (v *WindowVisitor) Next() *Window {
 	}
 }
 
-func InitTerminalLoop() (root *Window, quit chan struct{}, outgoingUserInput chan byte) {
+func InitTerminalLoop(inputResolver func(byte) bool) (root *Window, quit chan struct{}) {
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		fmt.Println(err)
@@ -470,15 +483,14 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, outgoingUserInput cha
 	inChan := make(chan byte, 8)
 	go inputLoop(inChan)
 
-	outgoingUserInput = make(chan byte)
 	quitChan := make(chan struct{})
 	commands := make(chan Com, 8)
 	dimensions := make(chan int)
 
 	//define root window
 
-	root = &Window{nil, []*Window{}, []FloatBox{}, Box{1, 1, 0, 0}, commands, nil, outgoingUserInput, outgoingUserInput, true}
-	go terminalLoop(oldState, root, commands, inChan, outgoingUserInput, dimensions, quitChan)
+	root = &Window{nil, []*Window{}, []FloatBox{}, Box{1, 1, 0, 0}, commands, nil, inputResolver, true}
+	go terminalLoop(oldState, root, commands, inChan, dimensions, quitChan)
 
 	GetDimensions := GetWindowDimensionsFunc(commands, dimensions)
 	w, h := GetDimensions()
@@ -501,10 +513,10 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, outgoingUserInput cha
 		}
 	}()
 	root.GetOffsetComBuilder().Clear().Exec()
-	return root, quitChan, outgoingUserInput
+	return root, quitChan
 }
 
-func terminalLoop(oldState *term.State, root *Window, commandChan <-chan Com, userInputChan <-chan byte, outgoingUserInputChan chan<- byte, dimensionsChan chan<- int, quitChan chan<- struct{}) {
+func terminalLoop(oldState *term.State, root *Window, commandChan <-chan Com, userInputChan <-chan byte, dimensionsChan chan<- int, quitChan chan<- struct{}) {
 
 	go func() {
 		defer endTerminalLoop(oldState)
@@ -547,7 +559,7 @@ func terminalLoop(oldState *term.State, root *Window, commandChan <-chan Com, us
 					quitChan <- struct{}{}
 					return
 				default:
-					visitor.Current().input <- in
+					visitor.Current().ResolveInput(in)
 				}
 			}
 		}
