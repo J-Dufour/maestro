@@ -18,6 +18,8 @@ const (
 	KEY_BACK   = 'j'
 	KEY_SEEKF  = '.'
 	KEY_SEEKB  = ','
+
+	KEY_CYCLE = 'c'
 )
 
 func main() {
@@ -76,7 +78,8 @@ func main() {
 	go inputDecoder(input, player)
 
 	// split
-	outerPWin.VSplit()
+	bottomWin := outerPWin.VSplit()
+	bottomWin.selectable = false
 	outerQWin := outerPWin.HSplit()
 
 	// make queue view
@@ -84,6 +87,7 @@ func main() {
 
 	// make player view
 	outerPWin.SetController(PlayerWindowControllerFunc(player))
+	outerPWin.Select()
 
 	player.AddSourcesToQueue(absolutePaths...)
 	player.Start()

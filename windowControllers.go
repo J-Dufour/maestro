@@ -13,15 +13,19 @@ type OuterWindowController struct {
 	win *Window
 
 	title string
+
+	selected bool
 }
 
 func OuterWindowControllerFunc(title string, innerController func(*Window) Controller) func(*Window) Controller {
 	return func(w *Window) Controller {
-		out := &OuterWindowController{w, title}
+		out := &OuterWindowController{w, title, false}
 		out.Resize()
 
-		inner := w.NewInnerChild(1)
-		inner.SetController(innerController)
+		if innerController != nil {
+			inner := w.NewInnerChild(1, false)
+			inner.SetController(innerController)
+		}
 		return out
 	}
 }
@@ -29,7 +33,17 @@ func OuterWindowControllerFunc(title string, innerController func(*Window) Contr
 func (o *OuterWindowController) Resize() {
 	w, h := o.win.GetDimensions()
 
-	o.win.GetOffsetComBuilder().DrawBox(Box{0, 0, uint(w), uint(h)}, o.title).Exec()
+	o.win.GetOffsetComBuilder().DrawBox(Box{0, 0, uint(w), uint(h)}, o.title, o.selected).Exec()
+}
+
+func (o *OuterWindowController) Select() {
+	o.selected = true
+	o.Resize()
+}
+
+func (o *OuterWindowController) Deselect() {
+	o.selected = false
+	o.Resize()
 }
 
 type QueueWindowController struct {
@@ -61,6 +75,9 @@ func QueueWindowControllerFunc(player *audio.Player) func(*Window) Controller {
 func (q *QueueWindowController) Resize() {
 	q.UpdateQueue(q.queue)
 }
+
+func (q *QueueWindowController) Select()   {}
+func (q *QueueWindowController) Deselect() {}
 
 func (q *QueueWindowController) UpdateQueue(queue []audio.Metadata) {
 	q.queue = queue
@@ -177,6 +194,9 @@ func PlayerWindowControllerFunc(player *audio.Player) func(*Window) Controller {
 	})
 
 }
+
+func (q *PlayerWindowController) Select()   {}
+func (q *PlayerWindowController) Deselect() {}
 
 func (p *PlayerWindowController) Resize() {
 	p.w, p.h = p.win.GetDimensions()

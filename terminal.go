@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -173,14 +174,20 @@ func (cb *ComBuilder) BuildCom() Com {
 	return Com(cb.builder.String())
 }
 
-func (cb *ComBuilder) DrawBox(box Box, title string) *ComBuilder {
+func (cb *ComBuilder) DrawBox(box Box, title string, highlighted bool) *ComBuilder {
 	//ensure width fits title
 	if len(title) > int(box.w)-2 || box.h < 2 {
 		return cb
 	}
 
+	graphicsMode := POSITIVE
+	if highlighted {
+		graphicsMode = NEGATIVE
+	}
+
 	//offset
-	cb.Offset(int(box.x), int(box.y)).Write(BOX_S_TL, title, strings.Repeat(string(BOX_S_H), int(box.w)-2-len(title)), BOX_S_TR)
+	cb.Offset(int(box.x), int(box.y)).Write(BOX_S_TL).SelectGraphicsRendition(graphicsMode).Write(title).ClearGraphicsRendition().Write(strings.Repeat(string(BOX_S_H), int(box.w)-2-len(title)), BOX_S_TR)
+
 	//write
 	for i := 0; i < int(box.h)-2; i++ {
 		cb.MoveLines(1).Offset(int(box.x), 0).Write(BOX_S_V).Offset(int(box.w)-2, 0).Write(BOX_S_V)
@@ -220,6 +227,8 @@ type Window struct {
 
 	coms chan Com
 	con  Controller
+
+	selectable bool
 }
 
 func (win *Window) GetDimensions() (w int, h int) {
@@ -236,7 +245,7 @@ func (win *Window) WithinBounds(box Box) bool {
 
 }
 
-func (win *Window) NewChild(box Box) (child *Window) {
+func (win *Window) NewChild(box Box, selectable bool) (child *Window) {
 	if !win.WithinBounds(box) {
 		return nil
 	}
@@ -248,7 +257,7 @@ func (win *Window) NewChild(box Box) (child *Window) {
 		}
 	}
 
-	child = &Window{win, []*Window{}, []FloatBox{}, box, win.coms, nil}
+	child = &Window{win, []*Window{}, []FloatBox{}, box, win.coms, nil, selectable}
 	win.children = append(win.children, child)
 
 	// calculate relative dimensions
@@ -303,19 +312,26 @@ func (win *Window) SetController(c func(*Window) Controller) {
 	win.con = c(win)
 }
 
-func (win *Window) NewInnerChild(levels int) (child *Window) {
+func (win *Window) NewInnerChild(levels int, canSelect bool) (child *Window) {
 	childBox := Box{uint(levels), uint(levels), win.w - uint(2*levels), win.h - uint(2*levels)}
-	child = win.NewChild(childBox)
+	child = win.NewChild(childBox, canSelect)
 	return child
 }
 
 func (win *Window) HSplit() (sibling *Window) {
 	halfW := win.w / 2
 	// create parent
-	parent := &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, float64(halfW) / float64(win.w), 1}}, win.Box, win.coms, nil}
-
+	var parent *Window
 	if win.parent == nil {
+		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, float64(halfW) / float64(win.w), 1}}, win.Box, win.coms, nil, false}
 		win.x, win.y = 0, 0
+	} else {
+		var err error
+		parent, err = win.parent.createIntermediateChild(win)
+		if err != nil {
+			return nil
+		}
+		parent.childPositions[0] = FloatBox{0, 0, float64(halfW) / float64(win.w), 1}
 	}
 
 	win.parent = parent
@@ -326,18 +342,26 @@ func (win *Window) HSplit() (sibling *Window) {
 	// create sibling
 	sibBox := Box{halfW, 0, parent.w - halfW, win.h}
 
-	sibling = parent.NewChild(sibBox)
+	sibling = parent.NewChild(sibBox, true)
 
 	return sibling
 }
 
 func (win *Window) VSplit() (sibling *Window) {
 	halfH := win.h / 2
-	// create parent
-	parent := &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, 1, float64(halfH) / float64(win.h)}}, win.Box, win.coms, nil}
 
+	// create parent
+	var parent *Window
 	if win.parent == nil {
+		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, 1, float64(halfH) / float64(win.h)}}, win.Box, win.coms, nil, false}
 		win.x, win.y = 0, 0
+	} else {
+		var err error
+		parent, err = win.parent.createIntermediateChild(win)
+		if err != nil {
+			return nil
+		}
+		parent.childPositions[0] = FloatBox{0, 0, 1, float64(halfH) / float64(win.h)}
 	}
 
 	win.parent = parent
@@ -348,11 +372,23 @@ func (win *Window) VSplit() (sibling *Window) {
 	// create sibling
 	sibBox := Box{0, halfH, win.w, parent.h - halfH}
 
-	sibling = parent.NewChild(sibBox)
+	sibling = parent.NewChild(sibBox, true)
 
 	return sibling
 }
 
+func (win *Window) createIntermediateChild(old *Window) (new *Window, err error) {
+
+	for i, child := range win.children {
+		if old == child {
+			new = &Window{win, []*Window{old}, []FloatBox{{0, 0, 1, 1}}, old.Box, old.coms, nil, false}
+			win.children[i] = new
+			return new, nil
+		}
+	}
+
+	return nil, errors.New("could not find old window")
+}
 func (win *Window) GetRoot() *Window {
 	if win.parent == nil {
 		return win
@@ -361,8 +397,65 @@ func (win *Window) GetRoot() *Window {
 	}
 }
 
+func (win *Window) Select() {
+	if win.con != nil {
+		win.con.Select()
+	}
+}
+
+func (win *Window) Deselect() {
+	if win.con != nil {
+		win.con.Deselect()
+	}
+}
+
 type Controller interface {
+	Select()
+	Deselect()
 	Resize()
+}
+
+type WindowVisitor struct {
+	cur     *Window
+	history []int
+}
+
+func NewWindowVisitor(win *Window) *WindowVisitor {
+	return &WindowVisitor{win, []int{-1}}
+}
+
+func (v *WindowVisitor) Current() *Window {
+	return v.cur
+}
+
+func (v *WindowVisitor) Next() *Window {
+	// increment latest idx
+	last := len(v.history) - 1
+	v.history[last]++
+
+	// check if valid child exists
+	if len(v.cur.children) > v.history[last] {
+		// get child
+		v.cur = v.cur.children[v.history[last]]
+	} else {
+		// go up one layer in history
+		v.history = v.history[:last]
+		if len(v.history) == 0 { // root changed since initialization. add layer to history
+			v.history = []int{0}
+		}
+
+		// move to parent if exists
+		if v.cur.parent != nil {
+			v.cur = v.cur.parent
+			return v.Next()
+		}
+	}
+	v.history = append(v.history, -1)
+	if v.cur.selectable {
+		return v.cur
+	} else {
+		return v.Next()
+	}
 }
 
 func InitTerminalLoop() (root *Window, quit chan struct{}, outgoingUserInput chan byte) {
@@ -376,14 +469,17 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, outgoingUserInput cha
 
 	outgoingUserInput = make(chan byte)
 	quitChan := make(chan struct{})
-	commands := make(chan Com)
+	commands := make(chan Com, 8)
 	dimensions := make(chan int)
-	go terminalLoop(oldState, commands, inChan, outgoingUserInput, dimensions, quitChan)
 
 	//define root window
+
+	root = &Window{nil, []*Window{}, []FloatBox{}, Box{1, 1, 0, 0}, commands, nil, true}
+	go terminalLoop(oldState, root, commands, inChan, outgoingUserInput, dimensions, quitChan)
+
 	GetDimensions := GetWindowDimensionsFunc(commands, dimensions)
 	w, h := GetDimensions()
-	root = &Window{nil, []*Window{}, []FloatBox{}, Box{1, 1, uint(w), uint(h)}, commands, nil}
+	root.Resize(Box{1, 1, uint(w), uint(h)})
 
 	//resize loop
 	go func() {
@@ -397,7 +493,7 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, outgoingUserInput cha
 			if w != curW || h != curH {
 				commands <- "\x1b[2J\x1b[3J\x1b[H"
 				curW, curH = w, h
-				root.Resize(Box{1, 1, uint(curW), uint(curH)})
+				root.GetRoot().Resize(Box{1, 1, uint(curW), uint(curH)})
 			}
 		}
 	}()
@@ -405,45 +501,55 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, outgoingUserInput cha
 	return root, quitChan, outgoingUserInput
 }
 
-func terminalLoop(oldState *term.State, commandChan <-chan Com, userInputChan <-chan byte, outgoingUserInputChan chan<- byte, dimensionsChan chan<- int, quitChan chan<- struct{}) {
-	defer endTerminalLoop(oldState)
+func terminalLoop(oldState *term.State, root *Window, commandChan <-chan Com, userInputChan <-chan byte, outgoingUserInputChan chan<- byte, dimensionsChan chan<- int, quitChan chan<- struct{}) {
 
-	// hide cursor
-	fmt.Printf("%c[?25l", ESC)
+	go func() {
+		defer endTerminalLoop(oldState)
 
-	for {
-		select {
-		case command := <-commandChan:
-			fmt.Print(command)
-		case in := <-userInputChan:
-			if in == byte(ESC) {
-				//read the rest
-				seq := []byte{in, <-userInputChan}
-				for b := range userInputChan {
-					seq = append(seq, b)
-					if b >= 0x40 && b <= 0x7E { //final byte reached
-						break
+		// hide cursor
+		fmt.Printf("%c[?25l", ESC)
+
+		visitor := NewWindowVisitor(root)
+
+		for {
+			select {
+			case command := <-commandChan:
+				fmt.Print(command)
+			case in := <-userInputChan:
+				switch in {
+				case byte(ESC):
+
+					//read the rest
+					seq := []byte{in, <-userInputChan}
+					for b := range userInputChan {
+						seq = append(seq, b)
+						if b >= 0x40 && b <= 0x7E { //final byte reached
+							break
+						}
 					}
+					// interpret
+					switch seq[len(seq)-1] {
+					case 'R':
+						// window resized
+						var w, h int
+						fmt.Sscanf(string(seq), "\x1b[%d;%dR", &h, &w)
+						dimensionsChan <- w
+						dimensionsChan <- h
+					}
+				case KEY_CYCLE:
+					visitor.Current().Deselect()
+					visitor.Next().Select()
+				case KEY_QUIT:
+					endTerminalLoop(oldState)
+					quitChan <- struct{}{}
+					return
+				default:
+					outgoingUserInputChan <- in
 				}
-				// interpret
-				switch seq[len(seq)-1] {
-				case 'R':
-					// window resized
-					var w, h int
-					fmt.Sscanf(string(seq), "\x1b[%d;%dR", &h, &w)
-					dimensionsChan <- w
-					dimensionsChan <- h
-				}
-
-			} else if in == KEY_QUIT {
-				endTerminalLoop(oldState)
-				quitChan <- struct{}{}
-				return
-			} else {
-				outgoingUserInputChan <- in
 			}
 		}
-	}
+	}()
+
 }
 
 func endTerminalLoop(oldState *term.State) {
