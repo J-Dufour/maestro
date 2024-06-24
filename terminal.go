@@ -228,6 +228,9 @@ type Window struct {
 	coms chan Com
 	con  Controller
 
+	input  chan byte
+	output chan byte
+
 	selectable bool
 }
 
@@ -257,7 +260,7 @@ func (win *Window) NewChild(box Box, selectable bool) (child *Window) {
 		}
 	}
 
-	child = &Window{win, []*Window{}, []FloatBox{}, box, win.coms, nil, selectable}
+	child = &Window{win, []*Window{}, []FloatBox{}, box, win.coms, nil, win.input, win.input, selectable}
 	win.children = append(win.children, child)
 
 	// calculate relative dimensions
@@ -323,7 +326,7 @@ func (win *Window) HSplit() (sibling *Window) {
 	// create parent
 	var parent *Window
 	if win.parent == nil {
-		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, float64(halfW) / float64(win.w), 1}}, win.Box, win.coms, nil, false}
+		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, float64(halfW) / float64(win.w), 1}}, win.Box, win.coms, nil, win.output, win.output, false}
 		win.x, win.y = 0, 0
 	} else {
 		var err error
@@ -353,7 +356,7 @@ func (win *Window) VSplit() (sibling *Window) {
 	// create parent
 	var parent *Window
 	if win.parent == nil {
-		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, 1, float64(halfH) / float64(win.h)}}, win.Box, win.coms, nil, false}
+		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, 1, float64(halfH) / float64(win.h)}}, win.Box, win.coms, nil, win.output, win.output, false}
 		win.x, win.y = 0, 0
 	} else {
 		var err error
@@ -381,7 +384,7 @@ func (win *Window) createIntermediateChild(old *Window) (new *Window, err error)
 
 	for i, child := range win.children {
 		if old == child {
-			new = &Window{win, []*Window{old}, []FloatBox{{0, 0, 1, 1}}, old.Box, old.coms, nil, false}
+			new = &Window{win, []*Window{old}, []FloatBox{{0, 0, 1, 1}}, old.Box, old.coms, nil, win.input, win.input, false}
 			win.children[i] = new
 			return new, nil
 		}
@@ -474,7 +477,7 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, outgoingUserInput cha
 
 	//define root window
 
-	root = &Window{nil, []*Window{}, []FloatBox{}, Box{1, 1, 0, 0}, commands, nil, true}
+	root = &Window{nil, []*Window{}, []FloatBox{}, Box{1, 1, 0, 0}, commands, nil, outgoingUserInput, outgoingUserInput, true}
 	go terminalLoop(oldState, root, commands, inChan, outgoingUserInput, dimensions, quitChan)
 
 	GetDimensions := GetWindowDimensionsFunc(commands, dimensions)
@@ -544,7 +547,7 @@ func terminalLoop(oldState *term.State, root *Window, commandChan <-chan Com, us
 					quitChan <- struct{}{}
 					return
 				default:
-					outgoingUserInputChan <- in
+					visitor.Current().input <- in
 				}
 			}
 		}
