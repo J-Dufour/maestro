@@ -9,17 +9,41 @@ import (
 	"github.com/J-Dufour/maestro/audio"
 )
 
-type OuterWindowController struct {
-	win *Window
-
-	title string
+type WindowController struct {
+	win        *Window
+	inputRange string
+	inputChan  chan byte
 
 	selected bool
 }
 
+func NewWindowController(win *Window) *WindowController {
+	out := &WindowController{}
+	out.win = win
+	out.inputChan = make(chan byte)
+	return out
+}
+
+func (c *WindowController) Select()   { c.selected = true }
+func (c *WindowController) Deselect() { c.selected = false }
+func (c *WindowController) ResolveInput(b byte) bool {
+	if strings.ContainsRune(c.inputRange, rune(b)) {
+		c.inputChan <- b
+		return true
+	} else {
+		return false
+	}
+}
+
+type OuterWindowController struct {
+	WindowController
+
+	title string
+}
+
 func OuterWindowControllerFunc(title string, innerController func(*Window) Controller) func(*Window) Controller {
 	return func(w *Window) Controller {
-		out := &OuterWindowController{w, title, false}
+		out := &OuterWindowController{*NewWindowController(w), title}
 		out.Resize()
 
 		if innerController != nil {
@@ -46,12 +70,12 @@ func (o *OuterWindowController) Deselect() {
 	o.Resize()
 }
 
-func (o *OuterWindowController) GetInputFilter() func(byte) bool {
-	return nil
+func (o *OuterWindowController) GetInputFilter() map[byte]bool {
+	return make(map[byte]bool)
 }
 
 type QueueWindowController struct {
-	win *Window
+	WindowController
 
 	queue     []audio.Metadata
 	sourceIdx int
@@ -65,7 +89,7 @@ func QueueWindowControllerFunc(player *audio.Player) func(*Window) Controller {
 	return OuterWindowControllerFunc(" Queue ",
 		func(w *Window) Controller {
 			controller := &QueueWindowController{}
-			controller.win = w
+			controller.WindowController = *NewWindowController(w)
 			controller.queue = make([]audio.Metadata, 0)
 			controller.sourceIdx = 0
 
@@ -79,11 +103,6 @@ func QueueWindowControllerFunc(player *audio.Player) func(*Window) Controller {
 func (q *QueueWindowController) Resize() {
 	q.UpdateQueue(q.queue)
 }
-
-func (q *QueueWindowController) Select()   {}
-func (q *QueueWindowController) Deselect() {}
-
-func (q *QueueWindowController) GetInputFilter() func(byte) bool { return nil }
 
 func (q *QueueWindowController) UpdateQueue(queue []audio.Metadata) {
 	q.queue = queue
@@ -168,7 +187,7 @@ func (q *QueueWindowController) startQueueWindowLoop(player *audio.Player) {
 }
 
 type PlayerWindowController struct {
-	win *Window
+	WindowController
 
 	metadata audio.Metadata
 
@@ -191,7 +210,7 @@ const (
 
 func PlayerWindowControllerFunc(player *audio.Player) func(*Window) Controller {
 	return OuterWindowControllerFunc(" Player ", func(w *Window) Controller {
-		controller := &PlayerWindowController{w, *audio.NewMetadata(), []int{}, 1, 0, 0}
+		controller := &PlayerWindowController{*NewWindowController(w), *audio.NewMetadata(), []int{}, 1, 0, 0}
 		controller.Resize()
 
 		controller.startPlayerWindowLoop(player)
@@ -200,10 +219,6 @@ func PlayerWindowControllerFunc(player *audio.Player) func(*Window) Controller {
 	})
 
 }
-
-func (p *PlayerWindowController) Select()                         {}
-func (p *PlayerWindowController) Deselect()                       {}
-func (p *PlayerWindowController) GetInputFilter() func(byte) bool { return nil }
 
 func (p *PlayerWindowController) Resize() {
 	p.w, p.h = p.win.GetDimensions()

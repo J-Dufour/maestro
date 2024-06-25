@@ -71,12 +71,11 @@ func main() {
 		return
 	}
 
-	// start input interpreter
-	input := make(chan byte, 8)
-	go inputDecoder(input, player)
-
 	// start UI
-	outerPWin, done := InitTerminalLoop(func(b byte) bool { input <- b; return true })
+	outerPWin, done, input := InitTerminalLoop()
+
+	// start input interpreter
+	go inputDecoder(input, player)
 
 	// split
 	bottomWin := outerPWin.VSplit()
