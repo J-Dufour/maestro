@@ -20,7 +20,7 @@ type WindowController struct {
 func NewWindowController(win *Window) *WindowController {
 	out := &WindowController{}
 	out.win = win
-	out.inputChan = make(chan byte)
+	out.inputChan = make(chan byte, 16)
 	return out
 }
 
@@ -28,7 +28,10 @@ func (c *WindowController) Select()   { c.selected = true }
 func (c *WindowController) Deselect() { c.selected = false }
 func (c *WindowController) ResolveInput(b byte) bool {
 	if strings.ContainsRune(c.inputRange, rune(b)) {
-		c.inputChan <- b
+		select {
+		case c.inputChan <- b:
+		default:
+		}
 		return true
 	} else {
 		return false
