@@ -477,18 +477,17 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, globalInput chan byte
 		fmt.Println(err)
 		return
 	}
-	inChan := make(chan byte, 8)
-	go inputLoop(inChan)
-
-	quitChan := make(chan struct{})
-	commands := make(chan Com, 8)
-	dimensions := make(chan int)
-	leftover := make(chan byte, 8)
 
 	//define root window
+	quitChan := make(chan struct{})
+	doneChan := make(chan struct{})
+	commands := make(chan Com)
+	go terminalLoop(oldState, commands, quitChan, doneChan)
 
 	root = &Window{nil, []*Window{}, []FloatBox{}, Box{1, 1, 0, 0}, commands, nil, true}
-	go terminalLoop(oldState, root, commands, inChan, leftover, dimensions, quitChan)
+	dimensions := make(chan int)
+	leftover := make(chan byte, 8)
+	go inputLoop(root, leftover, dimensions, quitChan)
 
 	GetDimensions := GetWindowDimensionsFunc(commands, dimensions)
 	w, h := GetDimensions()
@@ -511,60 +510,26 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, globalInput chan byte
 		}
 	}()
 	root.GetOffsetComBuilder().Clear().Exec()
-	return root, quitChan, leftover
+	return root, doneChan, leftover
 }
 
-func terminalLoop(oldState *term.State, root *Window, commandChan <-chan Com, userInputChan <-chan byte, leftoverInput chan<- byte, dimensionsChan chan<- int, quitChan chan<- struct{}) {
+func terminalLoop(oldState *term.State, commandChan <-chan Com, quitChan <-chan struct{}, doneChan chan<- struct{}) {
+	defer endTerminalLoop(oldState)
 
-	go func() {
-		defer endTerminalLoop(oldState)
+	// hide cursor
+	fmt.Printf("%c[?25l", ESC)
 
-		// hide cursor
-		fmt.Printf("%c[?25l", ESC)
+	for {
+		select {
+		case command := <-commandChan:
+			fmt.Print(command)
+		case <-quitChan:
+			endTerminalLoop(oldState)
+			doneChan <- struct{}{}
+			return
 
-		visitor := NewWindowVisitor(root)
-
-		for {
-			select {
-			case command := <-commandChan:
-				fmt.Print(command)
-			case in := <-userInputChan:
-				switch in {
-				case byte(ESC):
-
-					//read the rest
-					seq := []byte{in, <-userInputChan}
-					for b := range userInputChan {
-						seq = append(seq, b)
-						if b >= 0x40 && b <= 0x7E { //final byte reached
-							break
-						}
-					}
-					// interpret
-					switch seq[len(seq)-1] {
-					case 'R':
-						// window resized
-						var w, h int
-						fmt.Sscanf(string(seq), "\x1b[%d;%dR", &h, &w)
-						dimensionsChan <- w
-						dimensionsChan <- h
-					}
-				case KEY_CYCLE:
-					visitor.Current().Deselect()
-					visitor.Next().Select()
-				case KEY_QUIT:
-					endTerminalLoop(oldState)
-					quitChan <- struct{}{}
-					return
-				default:
-					if !visitor.Current().ResolveInput(in) {
-						leftoverInput <- in
-					}
-				}
-			}
 		}
-	}()
-
+	}
 }
 
 func endTerminalLoop(oldState *term.State) {
@@ -578,12 +543,49 @@ func endTerminalLoop(oldState *term.State) {
 	term.Restore(int(os.Stdin.Fd()), oldState)
 }
 
-func inputLoop(input chan byte) {
+func inputLoop(root *Window, input chan byte, dimensionsChan chan int, quitChan chan struct{}) {
+	visitor := NewWindowVisitor(root)
+
 	char := make([]byte, 1)
 	for {
 		count, _ := os.Stdin.Read(char)
 		if count > 0 {
-			input <- char[0]
+			in := char[0]
+			switch in {
+			case byte(ESC):
+
+				//read the rest
+				os.Stdin.Read(char)
+				seq := []byte{in, char[0]}
+				for {
+					os.Stdin.Read(char)
+					b := char[0]
+					seq = append(seq, b)
+					if b >= 0x40 && b <= 0x7E { //final byte reached
+						break
+					}
+				}
+				// interpret
+				switch seq[len(seq)-1] {
+				case 'R':
+					// window resized
+					var w, h int
+					fmt.Sscanf(string(seq), "\x1b[%d;%dR", &h, &w)
+					dimensionsChan <- w
+					dimensionsChan <- h
+				}
+			case KEY_CYCLE:
+				visitor.Current().Deselect()
+				visitor.Next().Select()
+			case KEY_QUIT:
+				quitChan <- struct{}{}
+				return
+			default:
+				if !visitor.Current().ResolveInput(in) {
+					input <- in
+				}
+			}
+
 		}
 	}
 }
