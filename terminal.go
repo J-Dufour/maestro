@@ -229,6 +229,7 @@ type Window struct {
 	con  Controller
 
 	selectable bool
+	selected   bool
 }
 
 func (win *Window) GetDimensions() (w int, h int) {
@@ -257,7 +258,7 @@ func (win *Window) NewChild(box Box, selectable bool) (child *Window) {
 		}
 	}
 
-	child = &Window{win, []*Window{}, []FloatBox{}, box, win.coms, nil, selectable}
+	child = &Window{win, []*Window{}, []FloatBox{}, box, win.coms, nil, selectable, false}
 	win.children = append(win.children, child)
 
 	// calculate relative dimensions
@@ -292,7 +293,7 @@ func (win *Window) Resize(b Box) {
 	win.Box = b
 
 	if win.con != nil {
-		win.con.Resize()
+		win.con.Resize(int(win.w), int(win.h))
 	}
 	for i, w := range win.children {
 		newX := uint(math.Round(float64(win.w) * win.childPositions[i].x))
@@ -308,8 +309,15 @@ func (win *Window) Exec(com Com) {
 	win.coms <- com
 }
 
-func (win *Window) SetController(c func(*Window) Controller) {
-	win.con = c(win)
+func (win *Window) SetController(c Controller) {
+	// terminate old controller
+	if win.con != nil {
+		win.con.Terminate()
+	}
+
+	// initiate new controller
+	win.con = c
+	win.con.Init(win.GetOffsetComBuilder, area{int(win.w), int(win.h)}, win.selected)
 }
 
 func (win *Window) NewInnerChild(levels int, canSelect bool) (child *Window) {
@@ -323,7 +331,7 @@ func (win *Window) HSplit() (sibling *Window) {
 	// create parent
 	var parent *Window
 	if win.parent == nil {
-		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, float64(halfW) / float64(win.w), 1}}, win.Box, win.coms, nil, false}
+		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, float64(halfW) / float64(win.w), 1}}, win.Box, win.coms, nil, false, false}
 		win.x, win.y = 0, 0
 	} else {
 		var err error
@@ -353,7 +361,7 @@ func (win *Window) VSplit() (sibling *Window) {
 	// create parent
 	var parent *Window
 	if win.parent == nil {
-		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, 1, float64(halfH) / float64(win.h)}}, win.Box, win.coms, nil, false}
+		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, 1, float64(halfH) / float64(win.h)}}, win.Box, win.coms, nil, false, false}
 		win.x, win.y = 0, 0
 	} else {
 		var err error
@@ -381,7 +389,7 @@ func (win *Window) createIntermediateChild(old *Window) (new *Window, err error)
 
 	for i, child := range win.children {
 		if old == child {
-			new = &Window{win, []*Window{old}, []FloatBox{{0, 0, 1, 1}}, old.Box, old.coms, nil, false}
+			new = &Window{win, []*Window{old}, []FloatBox{{0, 0, 1, 1}}, old.Box, old.coms, nil, false, false}
 			win.children[i] = new
 			return new, nil
 		}
@@ -398,12 +406,14 @@ func (win *Window) GetRoot() *Window {
 }
 
 func (win *Window) Select() {
+	win.selected = true
 	if win.con != nil {
 		win.con.Select()
 	}
 }
 
 func (win *Window) Deselect() {
+	win.selected = false
 	if win.con != nil {
 		win.con.Deselect()
 	}
@@ -421,11 +431,14 @@ func (win *Window) ResolveInput(b byte) bool {
 }
 
 type Controller interface {
+	Init(builderFactory func() *ComBuilder, dimensions area, selected bool)
+
 	Select()
 	Deselect()
-	Resize()
+	Resize(int, int)
 
 	ResolveInput(byte) bool
+	Terminate()
 }
 
 type WindowVisitor struct {
@@ -484,7 +497,7 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, globalInput chan byte
 	commands := make(chan Com)
 	go terminalLoop(oldState, commands, quitChan, doneChan)
 
-	root = &Window{nil, []*Window{}, []FloatBox{}, Box{1, 1, 0, 0}, commands, nil, true}
+	root = &Window{nil, []*Window{}, []FloatBox{}, Box{1, 1, 0, 0}, commands, nil, true, false}
 	dimensions := make(chan int)
 	leftover := make(chan byte, 8)
 	go inputLoop(root, leftover, dimensions, quitChan)

@@ -9,27 +9,58 @@ import (
 	"github.com/J-Dufour/maestro/audio"
 )
 
-type WindowController struct {
-	win        *Window
-	inputRange string
-	inputChan  chan byte
-
-	selected bool
+type area struct {
+	w, h int
 }
 
-func NewWindowController(win *Window) *WindowController {
-	out := &WindowController{}
-	out.win = win
-	out.inputChan = make(chan byte, 16)
+type ControllerChannels struct {
+	InputChan     chan byte
+	ResizeChan    chan area
+	TerminateChan chan struct{}
+	SelectChan    chan bool
+}
+
+func NewControllerChannels() ControllerChannels {
+	return ControllerChannels{
+		InputChan:     make(chan byte, 16),
+		ResizeChan:    make(chan area),
+		TerminateChan: make(chan struct{}),
+		SelectChan:    make(chan bool),
+	}
+}
+
+type BaseWindowController struct {
+	inputRange string
+
+	ControllerChannels
+
+	loop func(func() *ComBuilder, ControllerChannels)
+}
+
+func NewBaseWindowController(loop func(func() *ComBuilder, ControllerChannels), inputRange string) *BaseWindowController {
+	out := &BaseWindowController{}
+
+	out.ControllerChannels = NewControllerChannels()
+
+	out.loop = loop
+
 	return out
 }
 
-func (c *WindowController) Select()   { c.selected = true }
-func (c *WindowController) Deselect() { c.selected = false }
-func (c *WindowController) ResolveInput(b byte) bool {
+func (c *BaseWindowController) Init(builderFactory func() *ComBuilder, dimensions area, selected bool) {
+	go c.loop(builderFactory, c.ControllerChannels)
+	c.ResizeChan <- dimensions
+	if selected {
+		c.SelectChan <- true
+	}
+}
+
+func (c *BaseWindowController) Select()   { c.SelectChan <- true }
+func (c *BaseWindowController) Deselect() { c.SelectChan <- false }
+func (c *BaseWindowController) ResolveInput(b byte) bool {
 	if strings.ContainsRune(c.inputRange, rune(b)) {
 		select {
-		case c.inputChan <- b:
+		case c.InputChan <- b:
 		default:
 		}
 		return true
@@ -37,168 +68,138 @@ func (c *WindowController) ResolveInput(b byte) bool {
 		return false
 	}
 }
-
-type OuterWindowController struct {
-	WindowController
-
-	title string
+func (c *BaseWindowController) Resize(w, h int) {
+	c.ResizeChan <- area{w, h}
+}
+func (c *BaseWindowController) Terminate() {
+	c.TerminateChan <- struct{}{}
 }
 
-func OuterWindowControllerFunc(title string, innerController func(*Window) Controller) func(*Window) Controller {
-	return func(w *Window) Controller {
-		out := &OuterWindowController{*NewWindowController(w), title}
-		out.Resize()
-
-		if innerController != nil {
-			inner := w.NewInnerChild(1, false)
-			inner.SetController(innerController)
-		}
-		return out
-	}
+type BorderedWindowController struct {
+	newCom   func() *ComBuilder
+	title    string
+	w, h     int
+	selected bool
 }
 
-func (o *OuterWindowController) Resize() {
-	w, h := o.win.GetDimensions()
-
-	o.win.GetOffsetComBuilder().DrawBox(Box{0, 0, uint(w), uint(h)}, o.title, o.selected).Exec()
+func NewBorderedWindowController(title string) Controller {
+	return &BorderedWindowController{nil, title, 0, 0, false}
 }
 
-func (o *OuterWindowController) Select() {
-	o.selected = true
-	o.Resize()
+func (b *BorderedWindowController) Init(builderFactory func() *ComBuilder, dimensions area, selected bool) {
+	b.newCom = builderFactory
+
+	b.w, b.h = dimensions.w, dimensions.h
+
+	b.selected = selected
+
+	b.Draw()
 }
 
-func (o *OuterWindowController) Deselect() {
-	o.selected = false
-	o.Resize()
+func (b *BorderedWindowController) Select() {
+	b.selected = true
+	b.Draw()
 }
 
-func (o *OuterWindowController) GetInputFilter() map[byte]bool {
-	return make(map[byte]bool)
+func (b *BorderedWindowController) Deselect() {
+	b.selected = false
+	b.Draw()
 }
 
-type QueueWindowController struct {
-	WindowController
-
-	queue     []audio.Metadata
-	sourceIdx int
-
-	maxTitleLen int
-	maxIdxLen   int
-	maxHeight   int
+func (b *BorderedWindowController) Resize(w, h int) {
+	b.w, b.h = w, h
+	b.Draw()
 }
 
-func QueueWindowControllerFunc(player *audio.Player) func(*Window) Controller {
-	return OuterWindowControllerFunc(" Queue ",
-		func(w *Window) Controller {
-			controller := &QueueWindowController{}
-			controller.WindowController = *NewWindowController(w)
-			controller.queue = make([]audio.Metadata, 0)
-			controller.sourceIdx = 0
-
-			controller.Resize()
-
-			controller.startQueueWindowLoop(player)
-			return controller
-		})
+func (b *BorderedWindowController) ResolveInput(byte) bool {
+	return false
 }
 
-func (q *QueueWindowController) Resize() {
-	q.UpdateQueue(q.queue)
+func (b *BorderedWindowController) Terminate() {}
+
+func (b *BorderedWindowController) Draw() {
+	b.newCom().DrawBox(Box{0, 0, uint(b.w), uint(b.h)}, b.title, b.selected).Exec()
 }
 
-func (q *QueueWindowController) UpdateQueue(queue []audio.Metadata) {
-	q.queue = queue
+func NewQueueWindowController(player *audio.Player) Controller {
+	return NewBaseWindowController(func(buildCom func() *ComBuilder, con ControllerChannels) {
+		queueUpdated := make(chan struct{})
+		songUpdated := make(chan struct{})
 
-	// grab dimensions
-	width, height := q.win.GetDimensions()
-	q.maxHeight = height
+		player.SubscribeToQueueUpdate(queueUpdated)
+		player.SubscribeToSourceChange(songUpdated)
 
-	if length := len(q.queue); length == 0 {
-		q.maxIdxLen = 1
-	} else {
-		q.maxIdxLen = 1 + int(math.Log10(float64(length)))
-	}
+		queue := player.GetQueue()
+		curIdx := 0
+		maxIdxLen := 1
 
-	q.maxTitleLen = width - q.maxIdxLen - 2
-
-	// draw queue
-	builder := q.win.GetOffsetComBuilder()
-	for i, source := range q.queue {
-		if i >= q.maxHeight {
-			break
-		}
-		builder.Write(q.getQueueLine(i+1, source)).MoveLines(1)
-	}
-	builder.Exec()
-
-	// highlight
-	q.Highlight(q.sourceIdx)
-}
-
-func (q *QueueWindowController) getQueueLine(idx int, metadata audio.Metadata) string {
-	line := metadata.Title
-	if q.maxTitleLen > len(line)+6 {
-		line += " - " + metadata.Artist
-	}
-
-	if len(line) > q.maxTitleLen {
-		line = line[:q.maxTitleLen-3] + "..."
-	}
-
-	return fmt.Sprintf("%*d. %-*s", q.maxIdxLen, idx, q.maxTitleLen, line)
-}
-
-func (q *QueueWindowController) Highlight(idx int) {
-	if q.sourceIdx >= len(q.queue) {
-		return
-	}
-	//un-highlight previous
-	metadata := q.queue[q.sourceIdx]
-	builder := q.win.GetOffsetComBuilder()
-	builder.MoveLines(q.sourceIdx).SelectGraphicsRendition(POSITIVE).Write(q.getQueueLine(q.sourceIdx+1, metadata))
-
-	q.sourceIdx = idx
-	if q.sourceIdx >= len(q.queue) {
-		return
-	}
-
-	metadata = q.queue[q.sourceIdx]
-	builder.MoveTo(1, uint(q.sourceIdx+1)).SelectGraphicsRendition(NEGATIVE).Write(q.getQueueLine(q.sourceIdx+1, metadata)).ClearGraphicsRendition()
-	builder.Exec()
-}
-
-func (q *QueueWindowController) startQueueWindowLoop(player *audio.Player) {
-	queueUpdated := make(chan struct{})
-	songUpdated := make(chan struct{})
-
-	player.SubscribeToQueueUpdate(queueUpdated)
-	player.SubscribeToSourceChange(songUpdated)
-
-	go func() {
+		dims := area{0, 0}
 		for {
 			select {
 			case <-queueUpdated:
-				// redraw queue
-				q.UpdateQueue(player.GetQueue())
+				queue = player.GetQueue()
+				if length := len(queue); length == 0 {
+					maxIdxLen = 1
+				} else {
+					maxIdxLen = 1 + int(math.Log10(float64(length)))
+				}
+				DrawQueue(buildCom(), queue, curIdx, maxIdxLen, dims.w, dims.h)
+
 			case <-songUpdated:
-				// clear previous
-				q.Highlight(player.GetPositionInQueue())
+				builder := buildCom()
+				if curIdx < len(queue) {
+					builder.MoveTo(1, uint(curIdx+1))
+					WriteQueueLine(builder, curIdx+1, maxIdxLen, queue[curIdx], dims.w-2-maxIdxLen, false)
+				}
+				curIdx = player.GetPositionInQueue()
+				if curIdx < len(queue) {
+					builder.MoveTo(1, uint(curIdx+1))
+					WriteQueueLine(builder, curIdx+1, maxIdxLen, queue[curIdx], dims.w-2-maxIdxLen, true)
+				}
+				builder.Exec()
+
+			case newDims := <-con.ResizeChan:
+				dims = newDims
+				DrawQueue(buildCom(), queue, curIdx, maxIdxLen, dims.w, dims.h)
+			case <-con.TerminateChan:
+				return
+			case <-con.SelectChan:
+			case <-con.InputChan:
 			}
 		}
-	}()
+	}, "")
 }
 
-type PlayerWindowController struct {
-	WindowController
+func DrawQueue(builder *ComBuilder, queue []audio.Metadata, curIdx, maxIdxLen, w, h int) {
+	maxTitleLen := w - maxIdxLen - 2
 
-	metadata audio.Metadata
+	// draw queue
+	for i, source := range queue {
+		if i >= h {
+			break
+		}
 
-	infoLines []int
-	trackLine int
+		WriteQueueLine(builder, i+1, maxIdxLen, source, maxTitleLen, i == curIdx).MoveLines(1)
+	}
+	builder.Exec()
+}
 
-	w int
-	h int
+func WriteQueueLine(builder *ComBuilder, idx int, maxIdx int, metadata audio.Metadata, maxW int, highlighted bool) *ComBuilder {
+	graphics := POSITIVE
+	if highlighted {
+		graphics = NEGATIVE
+	}
+
+	line := metadata.Title
+	if maxW > len(line)+6 {
+		line += " - " + metadata.Artist
+	}
+
+	if len(line) > maxW {
+		line = line[:maxW-3] + "..."
+	}
+
+	return builder.SelectGraphicsRendition(graphics).Write(fmt.Sprintf("%*d. %-*s", maxIdx, idx, maxW, line)).ClearGraphicsRendition()
 }
 
 const (
@@ -211,64 +212,80 @@ const (
 	CURSOR_END   = '┨'
 )
 
-func PlayerWindowControllerFunc(player *audio.Player) func(*Window) Controller {
-	return OuterWindowControllerFunc(" Player ", func(w *Window) Controller {
-		controller := &PlayerWindowController{*NewWindowController(w), *audio.NewMetadata(), []int{}, 1, 0, 0}
-		controller.Resize()
+func NewPlayerWindowController(player *audio.Player) Controller {
+	return NewBaseWindowController(func(buildCom func() *ComBuilder, con ControllerChannels) {
+		songUpdated := make(chan struct{})
+		player.SubscribeToSourceChange(songUpdated)
 
-		controller.startPlayerWindowLoop(player)
+		curSource := *audio.NewMetadata()
 
-		return controller
-	})
+		dims := area{0, 0}
+		infoLines := []int{1}
 
+		period := 100 * time.Millisecond
+		clock := time.NewTicker(period)
+
+		for {
+			select {
+			case <-songUpdated:
+				curSource = player.GetQueue()[player.GetPositionInQueue()]
+				DrawInfo(buildCom(), curSource, infoLines, int64(player.GetPositionInTrack()), dims)
+
+			case newDims := <-con.ResizeChan:
+				dims = newDims
+				infoLines = infoLinesFromHeight(dims.h)
+				DrawInfo(buildCom(), curSource, infoLines, int64(player.GetPositionInTrack()), dims)
+			case <-clock.C:
+				DrawTrack(buildCom(), curSource, int64(player.GetPositionInTrack()), infoLines[len(infoLines)-1], dims)
+			case <-con.TerminateChan:
+				return
+			case <-con.SelectChan:
+			case <-con.InputChan:
+			}
+		}
+	}, "")
 }
 
-func (p *PlayerWindowController) Resize() {
-	p.w, p.h = p.win.GetDimensions()
-
-	// center info
+func infoLinesFromHeight(h int) []int {
 	switch {
-	case p.h == 1:
-		p.infoLines = []int{}
-		p.trackLine = 1
-	case p.h == 2:
-		p.infoLines = []int{1}
-		p.trackLine = 2
-	case p.h == 3:
-		p.infoLines = []int{1, 2}
-		p.trackLine = 3
-	case p.h <= 7:
-		start := (p.h-4)/2 + 1
-		p.infoLines = []int{start, start + 1, start + 2}
-		p.trackLine = start + 3
+	case h == 1:
+		return []int{1}
+	case h == 2:
+		return []int{1, 2}
+	case h == 3:
+		return []int{1, 2, 3}
+	case h <= 7:
+		start := (h-4)/2 + 1
+		return []int{start, start + 1, start + 2, start + 3}
 	default:
-		start := (p.h-7)/2 + 1
-		p.infoLines = []int{start, start + 2, start + 4}
-		p.trackLine = start + 6
+		start := (h-7)/2 + 1
+		return []int{start, start + 2, start + 4, start + 6}
 	}
-
-	p.SetTrackPosition(0)
-	p.SetNewMetadata(p.metadata)
 }
 
-func (p *PlayerWindowController) SetNewMetadata(source audio.Metadata) {
-	p.metadata = source
-
+func DrawInfo(builder *ComBuilder, source audio.Metadata, lines []int, pos int64, dims area) {
+	lastIdx := len(lines) - 1
+	DrawMetadata(builder, source, lines[:lastIdx], dims)
+	DrawTrack(builder, source, pos, lines[lastIdx], dims)
+}
+func DrawMetadata(builder *ComBuilder, source audio.Metadata, lines []int, dims area) {
 	//draw
-	switch len(p.infoLines) {
-	case 1:
-		line := centeredString(concatMax(p.w, " - ", p.metadata.Title, p.metadata.Album, p.metadata.Artist), p.w)
-		p.win.GetOffsetComBuilder().MoveTo(1, uint(p.infoLines[0])).Write(line).Exec()
-	case 2:
-		line1 := centeredString(concatMax(p.w, " - ", p.metadata.Title, p.metadata.Album), p.w)
-		line2 := centeredString(concatMax(p.w, " - ", p.metadata.Artist), p.w)
+	switch len(lines) {
+	case 0:
 
-		p.win.GetOffsetComBuilder().MoveTo(1, uint(p.infoLines[0])).Write(line1).MoveTo(1, uint(p.infoLines[1])).Write(line2).Exec()
+	case 1:
+		line := centeredString(concatMax(dims.w, " - ", source.Title, source.Album, source.Artist), dims.w)
+		builder.MoveTo(1, uint(lines[0])).Write(line).Exec()
+	case 2:
+		line1 := centeredString(concatMax(dims.w, " - ", source.Title, source.Album), dims.w)
+		line2 := centeredString(concatMax(dims.w, " - ", source.Artist), dims.w)
+
+		builder.MoveTo(1, uint(lines[0])).Write(line1).MoveTo(1, uint(lines[1])).Write(line2).Exec()
 	case 3:
-		line1 := centeredString(concatMax(p.w, "", p.metadata.Title), p.w)
-		line2 := centeredString(concatMax(p.w, "", p.metadata.Album), p.w)
-		line3 := centeredString(concatMax(p.w, "", p.metadata.Artist), p.w)
-		p.win.GetOffsetComBuilder().MoveTo(1, uint(p.infoLines[0])).Write(line1).MoveTo(1, uint(p.infoLines[1])).Write(line2).MoveTo(1, uint(p.infoLines[2])).Write(line3).Exec()
+		line1 := centeredString(concatMax(dims.w, "", source.Title), dims.w)
+		line2 := centeredString(concatMax(dims.w, "", source.Album), dims.w)
+		line3 := centeredString(concatMax(dims.w, "", source.Artist), dims.w)
+		builder.MoveTo(1, uint(lines[0])).Write(line1).MoveTo(1, uint(lines[1])).Write(line2).MoveTo(1, uint(lines[2])).Write(line3).Exec()
 	}
 }
 
@@ -295,48 +312,27 @@ func centeredString(str string, width int) string {
 
 }
 
-func (p *PlayerWindowController) SetTrackPosition(pos int64) {
-	duration := p.metadata.Duration
+func DrawTrack(builder *ComBuilder, source audio.Metadata, pos int64, trackHeight int, dims area) {
+	duration := source.Duration
 	var realPos int
 	if duration == 0 {
 		realPos = 0
 	} else {
 		ratio := float64(pos) / float64(duration)
-		realPos = int(ratio * float64(p.w))
-		if realPos > p.w-1 {
-			realPos = p.w - 1
+		realPos = int(ratio * float64(dims.w))
+		if realPos > dims.w-1 {
+			realPos = dims.w - 1
 		}
 	}
 	var cursor rune
 	switch realPos {
 	case 0:
 		cursor = CURSOR_START
-	case p.w - 1:
+	case dims.w - 1:
 		cursor = CURSOR_END
 	default:
 		cursor = CURSOR_MID
 	}
 
-	p.win.GetOffsetComBuilder().MoveTo(1, uint(p.trackLine)).Write(LINE_START, strings.Repeat(string(LINE_MID), p.w-2), LINE_END).MoveTo(uint(realPos)+1, uint(p.trackLine)).Write(cursor).Exec()
-}
-
-func (p *PlayerWindowController) startPlayerWindowLoop(player *audio.Player) {
-	songUpdated := make(chan struct{})
-	player.SubscribeToSourceChange(songUpdated)
-
-	go func() {
-		period := 100 * time.Millisecond
-		clock := time.NewTicker(period)
-		for {
-			select {
-			case <-songUpdated:
-				if idx := player.GetPositionInQueue(); idx < len(player.GetQueue()) {
-					p.SetNewMetadata(player.GetQueue()[idx])
-				}
-				p.SetTrackPosition(int64(player.GetPositionInTrack()))
-			case <-clock.C:
-				p.SetTrackPosition(int64(player.GetPositionInTrack()))
-			}
-		}
-	}()
+	builder.MoveTo(1, uint(trackHeight)).Write(LINE_START, strings.Repeat(string(LINE_MID), dims.w-2), LINE_END).MoveTo(uint(realPos)+1, uint(trackHeight)).Write(cursor).Exec()
 }
