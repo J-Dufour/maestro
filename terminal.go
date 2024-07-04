@@ -214,6 +214,12 @@ func (cb *ComBuilder) ClearGraphicsRendition() *ComBuilder {
 	return cb
 }
 
+func (cb *ComBuilder) PermaOffset(x, y uint) *ComBuilder {
+	cb.offX += x
+	cb.offY += y
+	return cb.Offset(int(x), int(y))
+}
+
 func (cb *ComBuilder) Exec() {
 	// sends command to window
 	cb.win.Exec(cb.BuildCom())
@@ -274,13 +280,10 @@ func (win *Window) GetOffsetComBuilder() *ComBuilder {
 	var cb *ComBuilder
 	if win.parent != nil {
 		cb = win.parent.GetOffsetComBuilder()
-		//permanent offset for dealing with relative coordinates
-		cb.offX += win.x
-		cb.offY += win.y
-
 		cb.win = win
-		//starting offset
-		cb.Offset(int(win.x), int(win.y))
+
+		//Offset
+		cb.PermaOffset(win.x, win.y)
 	} else {
 		cb = &ComBuilder{0, 0, win, &strings.Builder{}}
 		cb.MoveTo(0, 0)
