@@ -20,6 +20,7 @@ const (
 	KEY_SEEKB  = ','
 
 	KEY_CYCLE = 'c'
+	KEY_SPLIT = 's'
 )
 
 func main() {
@@ -78,9 +79,9 @@ func main() {
 	go inputDecoder(input, player)
 
 	// split
-	bottomWin := pWin.VSplit()
-	bottomWin.selectable = false
-	qWin := pWin.HSplit()
+	bottomWin := VSplit(pWin)
+	bottomWin.SetSelectable(false)
+	qWin := HSplit(pWin)
 
 	// make queue view
 	qWin.SetController(NewBorderedWindowController(" Queue ", NewQueueWindowController(player)))

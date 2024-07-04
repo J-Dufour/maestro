@@ -1,9 +1,7 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"math"
 	"os"
 	"strings"
 	"time"
@@ -87,23 +85,12 @@ type Box struct {
 	h uint
 }
 
-type FloatBox struct {
-	x float64
-	y float64
-	w float64
-	h float64
-}
-
-func boxesCollide(box1 Box, box2 Box) bool {
-	return !(box2.x+box2.w <= box1.x || box1.x+box1.w <= box2.x || box2.y+box2.h <= box1.y || box1.y+box1.h <= box2.y)
-}
-
 type Com string
 type ComBuilder struct {
 	offX uint
 	offY uint
 
-	win     *Window
+	win     Window
 	builder *strings.Builder
 }
 
@@ -225,10 +212,241 @@ func (cb *ComBuilder) Exec() {
 	cb.win.Exec(cb.BuildCom())
 }
 
-type Window struct {
-	parent         *Window
-	children       []*Window
-	childPositions []FloatBox
+type parentWindowCreator func(*BaseWindow) ParentWindow
+
+type ParentWindow interface {
+	Window
+
+	NewChild() Window
+	ReplaceChild(Window, Window) bool
+	AddChild(Window)
+	SwapPos(int, int)
+}
+
+type Window interface {
+	GetParent() ParentWindow
+
+	Encapsulate(parentWindowCreator)
+
+	GetChildren() []Window
+
+	GetDimensions() (int, int)
+	getBox() Box
+	Resize(b Box)
+
+	GetOffsetComBuilder() *ComBuilder
+	Exec(Com)
+
+	SetController(Controller)
+	ResolveInput(b byte) bool
+	Select()
+	Deselect()
+	isSelectable() bool
+	SetSelectable(bool)
+}
+
+func GetRoot(w Window) Window {
+	if w.GetParent() == nil {
+		return w
+	} else {
+		return GetRoot(w.GetParent())
+	}
+}
+
+type stackWindow1D struct {
+	BaseWindow
+
+	children         []Window
+	childProportions []float64
+}
+
+func (win *stackWindow1D) SwapPos(a, b int) {
+	if 0 <= a && a < len(win.children) && 0 <= b && b < len(win.children) {
+		win.children[a], win.children[b] = win.children[b], win.children[a]
+	}
+}
+
+func (win *stackWindow1D) GetChildren() []Window {
+	return win.children
+}
+
+func split(width int, proportions []float64) []int {
+	if len(proportions) == 0 {
+		return []int{}
+	}
+
+	total := float64(0)
+	for _, val := range proportions {
+		total += val
+	}
+
+	ratio := proportions[0] / total
+
+	out := int(float64(width) * ratio)
+	if out > width {
+		out = width
+	}
+
+	return append([]int{out}, split(width-out, proportions[1:])...)
+}
+
+type VerticalStackWindow struct{ stackWindow1D }
+
+func NewVerticalStackWindow(b *BaseWindow) ParentWindow {
+	return &VerticalStackWindow{stackWindow1D{*b, []Window{}, []float64{}}}
+}
+
+func (win *VerticalStackWindow) NewChild() (child Window) {
+	child = &BaseWindow{win, win.Box, win.coms, nil, true, false}
+	win.AddChild(child)
+
+	return child
+}
+
+func (win *VerticalStackWindow) AddChild(child Window) {
+	win.childProportions = append(win.childProportions, 1)
+	win.children = append(win.children, child)
+	win.Resize(win.Box)
+}
+
+func (win *VerticalStackWindow) ReplaceChild(old Window, new Window) bool {
+	for i, v := range win.children {
+		if v == old {
+			win.children[i] = new
+			win.Resize(win.Box)
+			return true
+		}
+	}
+	return false
+}
+
+func (win *VerticalStackWindow) Resize(b Box) {
+	win.Box = b
+
+	if win.con != nil {
+		win.con.Resize(int(win.w), int(win.h))
+	}
+
+	newHeights := split(int(win.h), win.childProportions)
+	pos := 0
+	for i, w := range win.children {
+		newY := uint(pos)
+		newH := uint(newHeights[i])
+
+		pos += newHeights[i]
+		w.Resize(Box{0, newY, win.w, newH})
+	}
+}
+
+type HorizontalStackWindow struct{ stackWindow1D }
+
+func NewHorizontalStackWindow(b *BaseWindow) ParentWindow {
+	return &HorizontalStackWindow{stackWindow1D{*b, []Window{}, []float64{}}}
+}
+
+func (win *HorizontalStackWindow) NewChild() (child Window) {
+	child = &BaseWindow{win, win.Box, win.coms, nil, true, false}
+	win.AddChild(child)
+
+	return child
+}
+
+func (win *HorizontalStackWindow) AddChild(child Window) {
+	win.childProportions = append(win.childProportions, 1)
+	win.children = append(win.children, child)
+	win.Resize(win.Box)
+}
+
+func (win *HorizontalStackWindow) ReplaceChild(old Window, new Window) bool {
+	for i, v := range win.children {
+		if v == old {
+			win.children[i] = new
+			win.Resize(win.Box)
+			return true
+		}
+	}
+	return false
+}
+
+func (win *HorizontalStackWindow) Resize(b Box) {
+	win.Box = b
+
+	if win.con != nil {
+		win.con.Resize(int(win.w), int(win.h))
+	}
+
+	newWidths := split(int(win.w), win.childProportions)
+	pos := 0
+	for i, w := range win.children {
+		newX := uint(pos)
+		newW := uint(newWidths[i])
+
+		pos += newWidths[i]
+		w.Resize(Box{newX, 0, newW, win.h})
+	}
+}
+
+type ContainerWindow struct {
+	BaseWindow
+
+	child Window
+}
+
+func NewContainerWindow(b *BaseWindow) ParentWindow {
+	return &ContainerWindow{*b, nil}
+}
+
+func (win *ContainerWindow) NewChild() (child Window) {
+	if win.child != nil {
+		return nil
+	}
+
+	childBox := Box{1, 1, win.w - 2, win.h - 2}
+	win.AddChild(&BaseWindow{win, childBox, win.coms, win.con, true, false})
+	return win.child
+}
+
+func (win *ContainerWindow) AddChild(child Window) {
+	if win.child != nil {
+		return
+	}
+
+	win.child = child
+	win.Resize(win.Box)
+}
+
+func (win *ContainerWindow) ReplaceChild(old, new Window) bool {
+	if win.child == old {
+		win.child = new
+		return true
+	}
+	return false
+}
+
+func (win *ContainerWindow) SwapPos(a, b int) {}
+
+func (win *ContainerWindow) Resize(b Box) {
+	win.Box = b
+
+	if win.con != nil {
+		win.con.Resize(int(win.w), int(win.h))
+	}
+
+	if win.child != nil {
+		win.child.Resize(Box{1, 1, win.w - 2, win.h - 2})
+	}
+}
+
+func (win *ContainerWindow) GetChildren() []Window {
+	if win.child != nil {
+		return []Window{win.child}
+	} else {
+		return []Window{}
+	}
+}
+
+type BaseWindow struct {
+	parent ParentWindow
 	Box
 
 	coms chan Com
@@ -238,11 +456,11 @@ type Window struct {
 	selected   bool
 }
 
-func (win *Window) GetDimensions() (w int, h int) {
+func (win *BaseWindow) GetDimensions() (w int, h int) {
 	return int(win.w), int(win.h)
 }
 
-func (win *Window) WithinBounds(box Box) bool {
+func (win *BaseWindow) WithinBounds(box Box) bool {
 	//check if top left corner is within bounds
 	inTopL := box.x < win.w && box.y < win.h
 	//check if bottom right corner is within bounds
@@ -252,31 +470,7 @@ func (win *Window) WithinBounds(box Box) bool {
 
 }
 
-func (win *Window) NewChild(box Box, selectable bool) (child *Window) {
-	if !win.WithinBounds(box) {
-		return nil
-	}
-
-	//check if collides
-	for _, child := range win.children {
-		if boxesCollide(box, child.Box) {
-			return nil
-		}
-	}
-
-	child = &Window{win, []*Window{}, []FloatBox{}, box, win.coms, nil, selectable, false}
-	win.children = append(win.children, child)
-
-	// calculate relative dimensions
-	relX := float64(box.x) / float64(win.w)
-	relY := float64(box.y) / float64(win.h)
-	relW := float64(box.w) / float64(win.w)
-	relH := float64(box.h) / float64(win.h)
-	win.childPositions = append(win.childPositions, FloatBox{relX, relY, relW, relH})
-	return child
-}
-
-func (win *Window) GetOffsetComBuilder() *ComBuilder {
+func (win *BaseWindow) GetOffsetComBuilder() *ComBuilder {
 	var cb *ComBuilder
 	if win.parent != nil {
 		cb = win.parent.GetOffsetComBuilder()
@@ -292,27 +486,29 @@ func (win *Window) GetOffsetComBuilder() *ComBuilder {
 	return cb
 }
 
-func (win *Window) Resize(b Box) {
+func (win *BaseWindow) Resize(b Box) {
 	win.Box = b
 
 	if win.con != nil {
 		win.con.Resize(int(win.w), int(win.h))
 	}
-	for i, w := range win.children {
-		newX := uint(math.Round(float64(win.w) * win.childPositions[i].x))
-		newY := uint(math.Round(float64(win.h) * win.childPositions[i].y))
-		newW := uint(math.Round(float64(win.w) * win.childPositions[i].w))
-		newH := uint(math.Round(float64(win.h) * win.childPositions[i].h))
-		w.Resize(Box{newX, newY, newW, newH})
-	}
-
 }
 
-func (win *Window) Exec(com Com) {
+func (win *BaseWindow) Encapsulate(parentCreator parentWindowCreator) {
+
+	newParent := parentCreator(&BaseWindow{win.parent, win.Box, win.coms, nil, false, false})
+	if win.parent != nil {
+		win.parent.ReplaceChild(win, newParent)
+	}
+	newParent.AddChild(win)
+	win.parent = newParent
+}
+
+func (win *BaseWindow) Exec(com Com) {
 	win.coms <- com
 }
 
-func (win *Window) SetController(c Controller) {
+func (win *BaseWindow) SetController(c Controller) {
 	// terminate old controller
 	if win.con != nil {
 		win.con.Terminate()
@@ -323,106 +519,31 @@ func (win *Window) SetController(c Controller) {
 	win.con.Init(win.GetOffsetComBuilder, area{int(win.w), int(win.h)}, win.selected)
 }
 
-func (win *Window) NewInnerChild(levels int, canSelect bool) (child *Window) {
-	childBox := Box{uint(levels), uint(levels), win.w - uint(2*levels), win.h - uint(2*levels)}
-	child = win.NewChild(childBox, canSelect)
-	return child
-}
-
-func (win *Window) HSplit() (sibling *Window) {
-	halfW := win.w / 2
-	// create parent
-	var parent *Window
-	if win.parent == nil {
-		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, float64(halfW) / float64(win.w), 1}}, win.Box, win.coms, nil, false, false}
-		win.x, win.y = 0, 0
-	} else {
-		var err error
-		parent, err = win.parent.createIntermediateChild(win)
-		if err != nil {
-			return nil
-		}
-		parent.childPositions[0] = FloatBox{0, 0, float64(halfW) / float64(win.w), 1}
-	}
-
-	win.parent = parent
-
-	// shrink
-	win.w = halfW
-
-	// create sibling
-	sibBox := Box{halfW, 0, parent.w - halfW, win.h}
-
-	sibling = parent.NewChild(sibBox, true)
-
-	return sibling
-}
-
-func (win *Window) VSplit() (sibling *Window) {
-	halfH := win.h / 2
-
-	// create parent
-	var parent *Window
-	if win.parent == nil {
-		parent = &Window{win.parent, []*Window{win}, []FloatBox{{0, 0, 1, float64(halfH) / float64(win.h)}}, win.Box, win.coms, nil, false, false}
-		win.x, win.y = 0, 0
-	} else {
-		var err error
-		parent, err = win.parent.createIntermediateChild(win)
-		if err != nil {
-			return nil
-		}
-		parent.childPositions[0] = FloatBox{0, 0, 1, float64(halfH) / float64(win.h)}
-	}
-
-	win.parent = parent
-
-	// shrink
-	win.h = halfH
-
-	// create sibling
-	sibBox := Box{0, halfH, win.w, parent.h - halfH}
-
-	sibling = parent.NewChild(sibBox, true)
-
-	return sibling
-}
-
-func (win *Window) createIntermediateChild(old *Window) (new *Window, err error) {
-
-	for i, child := range win.children {
-		if old == child {
-			new = &Window{win, []*Window{old}, []FloatBox{{0, 0, 1, 1}}, old.Box, old.coms, nil, false, false}
-			win.children[i] = new
-			return new, nil
-		}
-	}
-
-	return nil, errors.New("could not find old window")
-}
-func (win *Window) GetRoot() *Window {
-	if win.parent == nil {
-		return win
-	} else {
-		return win.parent.GetRoot()
-	}
-}
-
-func (win *Window) Select() {
+func (win *BaseWindow) Select() {
 	win.selected = true
 	if win.con != nil {
 		win.con.Select()
 	}
+	if win.parent != nil {
+		win.parent.Select()
+	}
 }
 
-func (win *Window) Deselect() {
+func (win *BaseWindow) Deselect() {
 	win.selected = false
 	if win.con != nil {
 		win.con.Deselect()
 	}
+	if win.parent != nil {
+		win.parent.Deselect()
+	}
 }
 
-func (win *Window) ResolveInput(b byte) bool {
+func (win *BaseWindow) isSelectable() bool {
+	return win.selectable
+}
+
+func (win *BaseWindow) ResolveInput(b byte) bool {
 	if win.con == nil || !win.con.ResolveInput(b) {
 		if win.parent != nil {
 			return win.parent.ResolveInput(b)
@@ -431,6 +552,36 @@ func (win *Window) ResolveInput(b byte) bool {
 		}
 	}
 	return true
+}
+
+func (win *BaseWindow) getBox() Box {
+	return win.Box
+}
+
+func (win *BaseWindow) SetSelectable(b bool) {
+	win.selectable = b
+}
+
+func (win *BaseWindow) GetParent() ParentWindow {
+	return win.parent
+}
+
+func (win *BaseWindow) GetChildren() []Window {
+	return []Window{}
+}
+
+func HSplit(w Window) Window {
+	w.Encapsulate(NewHorizontalStackWindow)
+	out := w.GetParent().NewChild()
+	out.SetSelectable(true)
+	return out
+}
+
+func VSplit(w Window) Window {
+	w.Encapsulate(NewVerticalStackWindow)
+	out := w.GetParent().NewChild()
+	out.SetSelectable(true)
+	return out
 }
 
 type Controller interface {
@@ -445,27 +596,27 @@ type Controller interface {
 }
 
 type WindowVisitor struct {
-	cur     *Window
+	cur     Window
 	history []int
 }
 
-func NewWindowVisitor(win *Window) *WindowVisitor {
+func NewWindowVisitor(win Window) *WindowVisitor {
 	return &WindowVisitor{win, []int{-1}}
 }
 
-func (v *WindowVisitor) Current() *Window {
+func (v *WindowVisitor) Current() Window {
 	return v.cur
 }
 
-func (v *WindowVisitor) Next() *Window {
+func (v *WindowVisitor) Next() Window {
 	// increment latest idx
 	last := len(v.history) - 1
 	v.history[last]++
 
 	// check if valid child exists
-	if len(v.cur.children) > v.history[last] {
+	if len(v.cur.GetChildren()) > v.history[last] {
 		// get child
-		v.cur = v.cur.children[v.history[last]]
+		v.cur = v.cur.GetChildren()[v.history[last]]
 	} else {
 		// go up one layer in history
 		v.history = v.history[:last]
@@ -474,20 +625,20 @@ func (v *WindowVisitor) Next() *Window {
 		}
 
 		// move to parent if exists
-		if v.cur.parent != nil {
-			v.cur = v.cur.parent
+		if v.cur.GetParent() != nil {
+			v.cur = v.cur.GetParent()
 			return v.Next()
 		}
 	}
 	v.history = append(v.history, -1)
-	if v.cur.selectable {
+	if v.cur.isSelectable() {
 		return v.cur
 	} else {
 		return v.Next()
 	}
 }
 
-func InitTerminalLoop() (root *Window, quit chan struct{}, globalInput chan byte) {
+func InitTerminalLoop() (root Window, quit chan struct{}, globalInput chan byte) {
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		fmt.Println(err)
@@ -500,7 +651,7 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, globalInput chan byte
 	commands := make(chan Com)
 	go terminalLoop(oldState, commands, quitChan, doneChan)
 
-	root = &Window{nil, []*Window{}, []FloatBox{}, Box{1, 1, 0, 0}, commands, nil, true, false}
+	root = &BaseWindow{nil, Box{1, 1, 0, 0}, commands, nil, true, false}
 	dimensions := make(chan int)
 	leftover := make(chan byte, 8)
 	go inputLoop(root, leftover, dimensions, quitChan)
@@ -509,7 +660,7 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, globalInput chan byte
 	w, h := GetDimensions()
 	root.Resize(Box{1, 1, uint(w), uint(h)})
 
-	//resize loop
+	// resize loop
 	go func() {
 		curW, curH := GetDimensions()
 		resizeClock := time.NewTicker(100 * time.Millisecond)
@@ -521,7 +672,7 @@ func InitTerminalLoop() (root *Window, quit chan struct{}, globalInput chan byte
 			if w != curW || h != curH {
 				commands <- "\x1b[2J\x1b[3J\x1b[H"
 				curW, curH = w, h
-				root.GetRoot().Resize(Box{1, 1, uint(curW), uint(curH)})
+				GetRoot(root).Resize(Box{1, 1, uint(curW), uint(curH)})
 			}
 		}
 	}()
@@ -559,7 +710,7 @@ func endTerminalLoop(oldState *term.State) {
 	term.Restore(int(os.Stdin.Fd()), oldState)
 }
 
-func inputLoop(root *Window, input chan byte, dimensionsChan chan int, quitChan chan struct{}) {
+func inputLoop(root Window, input chan byte, dimensionsChan chan int, quitChan chan struct{}) {
 	visitor := NewWindowVisitor(root)
 
 	char := make([]byte, 1)
@@ -596,6 +747,8 @@ func inputLoop(root *Window, input chan byte, dimensionsChan chan int, quitChan 
 			case KEY_QUIT:
 				quitChan <- struct{}{}
 				return
+			case KEY_SPLIT:
+				HSplit(visitor.Current())
 			default:
 				if !visitor.Current().ResolveInput(in) {
 					input <- in
