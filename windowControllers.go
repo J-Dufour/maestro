@@ -80,10 +80,12 @@ type BorderedWindowController struct {
 	title    string
 	w, h     int
 	selected bool
+
+	inner Controller
 }
 
-func NewBorderedWindowController(title string) Controller {
-	return &BorderedWindowController{nil, title, 0, 0, false}
+func NewBorderedWindowController(title string, inner Controller) Controller {
+	return &BorderedWindowController{nil, title, 0, 0, false, inner}
 }
 
 func (b *BorderedWindowController) Init(builderFactory func() *ComBuilder, dimensions area, selected bool) {
@@ -94,28 +96,48 @@ func (b *BorderedWindowController) Init(builderFactory func() *ComBuilder, dimen
 	b.selected = selected
 
 	b.Draw()
+
+	innerFactory := func() *ComBuilder {
+		return builderFactory().PermaOffset(1, 1)
+	}
+
+	b.inner.Init(innerFactory, area{b.w - 2, b.h - 2}, selected)
 }
 
 func (b *BorderedWindowController) Select() {
 	b.selected = true
 	b.Draw()
+
+	b.inner.Select()
 }
 
 func (b *BorderedWindowController) Deselect() {
 	b.selected = false
 	b.Draw()
+
+	b.inner.Deselect()
 }
 
 func (b *BorderedWindowController) Resize(w, h int) {
 	b.w, b.h = w, h
 	b.Draw()
+
+	if w < 2 {
+		w = 2
+	}
+	if h < 2 {
+		h = 2
+	}
+	b.inner.Resize(w-2, h-2)
 }
 
-func (b *BorderedWindowController) ResolveInput(byte) bool {
-	return false
+func (b *BorderedWindowController) ResolveInput(by byte) bool {
+	return b.inner.ResolveInput(by)
 }
 
-func (b *BorderedWindowController) Terminate() {}
+func (b *BorderedWindowController) Terminate() {
+	b.inner.Terminate()
+}
 
 func (b *BorderedWindowController) Draw() {
 	b.newCom().DrawBox(Box{0, 0, uint(b.w), uint(b.h)}, b.title, b.selected).Exec()

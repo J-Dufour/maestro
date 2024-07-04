@@ -72,36 +72,26 @@ func main() {
 	}
 
 	// start UI
-	outerPWin, done, input := InitTerminalLoop()
+	pWin, done, input := InitTerminalLoop()
 
 	// start input interpreter
 	go inputDecoder(input, player)
 
 	// split
-	bottomWin := outerPWin.VSplit()
+	bottomWin := pWin.VSplit()
 	bottomWin.selectable = false
-	outerQWin := outerPWin.HSplit()
+	qWin := pWin.HSplit()
 
 	// make queue view
-	MakeQueueWindow(outerQWin, player)
+	qWin.SetController(NewBorderedWindowController(" Queue ", NewQueueWindowController(player)))
 
 	// make player view
-	MakePlayerWindow(outerPWin, player)
+	pWin.SetController(NewBorderedWindowController(" Player ", NewPlayerWindowController(player)))
 
 	player.AddSourcesToQueue(absolutePaths...)
 	player.Start()
 
 	<-done
-}
-
-func MakeQueueWindow(win *Window, player *audio.Player) {
-	win.SetController(NewBorderedWindowController(" Queue "))
-	win.NewInnerChild(1, false).SetController(NewQueueWindowController(player))
-}
-
-func MakePlayerWindow(win *Window, player *audio.Player) {
-	win.SetController(NewBorderedWindowController(" Player "))
-	win.NewInnerChild(1, false).SetController(NewPlayerWindowController(player))
 }
 
 func inputDecoder(input chan byte, player *audio.Player) {
