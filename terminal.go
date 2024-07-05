@@ -87,17 +87,15 @@ type Box struct {
 
 type Com string
 type ComBuilder struct {
-	offX uint
-	offY uint
-
-	win     Window
+	canvas  Box
 	builder *strings.Builder
+	channel chan Com
 }
 
 func NewCom() *ComBuilder { return &ComBuilder{} }
 
 func (cb *ComBuilder) MoveTo(x uint, y uint) *ComBuilder {
-	cb.builder.WriteString(fmt.Sprintf("%c[%d;%dH", ESC, cb.offY+y, cb.offX+x))
+	cb.builder.WriteString(fmt.Sprintf("%c[%d;%dH", ESC, cb.canvas.y+y, cb.canvas.x+x))
 	return cb
 }
 
@@ -137,19 +135,18 @@ func (cb *ComBuilder) Write(text ...any) *ComBuilder {
 func (cb *ComBuilder) MoveLines(lines int) *ComBuilder {
 	if lines > 0 {
 		cb.builder.WriteString(fmt.Sprintf("%c[%dE", ESC, lines))
-		cb.Offset(int(cb.offX), 0)
+		cb.Offset(int(cb.canvas.x), 0)
 	} else if lines < 0 {
 		cb.builder.WriteString(fmt.Sprintf("%c[%dF", ESC, -lines))
-		cb.Offset(int(cb.offX), 0)
+		cb.Offset(int(cb.canvas.x), 0)
 	}
 	return cb
 }
 
 func (cb *ComBuilder) Clear() *ComBuilder {
-	w, h := cb.win.GetDimensions()
-	clearString := strings.Repeat(" ", w)
+	clearString := strings.Repeat(" ", int(cb.canvas.w))
 	cb.MoveTo(1, 1)
-	for i := 0; i < h; i++ {
+	for i := 0; i < int(cb.canvas.h); i++ {
 		cb.builder.WriteString(clearString)
 		cb.MoveLines(1)
 	}
@@ -202,14 +199,19 @@ func (cb *ComBuilder) ClearGraphicsRendition() *ComBuilder {
 }
 
 func (cb *ComBuilder) PermaOffset(x, y uint) *ComBuilder {
-	cb.offX += x
-	cb.offY += y
+	cb.canvas.x += x
+	cb.canvas.y += y
 	return cb.Offset(int(x), int(y))
+}
+
+func (cb *ComBuilder) ChangeDimensions(w, h uint) *ComBuilder {
+	cb.canvas.w, cb.canvas.h = w, h
+	return cb
 }
 
 func (cb *ComBuilder) Exec() {
 	// sends command to window
-	cb.win.Exec(cb.BuildCom())
+	cb.channel <- cb.BuildCom()
 }
 
 type parentWindowCreator func(*BaseWindow) ParentWindow
@@ -474,12 +476,12 @@ func (win *BaseWindow) GetOffsetComBuilder() *ComBuilder {
 	var cb *ComBuilder
 	if win.parent != nil {
 		cb = win.parent.GetOffsetComBuilder()
-		cb.win = win
 
 		//Offset
 		cb.PermaOffset(win.x, win.y)
+		cb.ChangeDimensions(win.w, win.h)
 	} else {
-		cb = &ComBuilder{0, 0, win, &strings.Builder{}}
+		cb = &ComBuilder{Box{0, 0, win.w, win.h}, &strings.Builder{}, win.coms}
 		cb.MoveTo(0, 0)
 	}
 

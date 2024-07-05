@@ -98,7 +98,7 @@ func (b *BorderedWindowController) Init(builderFactory func() *ComBuilder, dimen
 	b.Draw()
 
 	innerFactory := func() *ComBuilder {
-		return builderFactory().PermaOffset(1, 1)
+		return builderFactory().PermaOffset(1, 1).ChangeDimensions(uint(b.w-2), uint(b.h-2))
 	}
 
 	b.inner.Init(innerFactory, area{b.w - 2, b.h - 2}, selected)
