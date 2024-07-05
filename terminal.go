@@ -515,7 +515,7 @@ func (win *BaseWindow) SetController(c Controller) {
 	if win.con != nil {
 		win.con.Terminate()
 	}
-
+	win.GetOffsetComBuilder().Clear().Exec()
 	// initiate new controller
 	win.con = c
 	win.con.Init(win.GetOffsetComBuilder, area{int(win.w), int(win.h)}, win.selected)
@@ -597,6 +597,20 @@ func addSibling(child Window) Window {
 	return out
 }
 
+func setNew(w Window, options map[string]func() Controller) {
+	out := make([]struct {
+		title   string
+		factory func() Controller
+	}, 0)
+	for k, v := range options {
+		out = append(out, struct {
+			title   string
+			factory func() Controller
+		}{k, v})
+	}
+	w.SetController(NewBorderedWindowController(" New ", NewSelectorWindowController(out, w.SetController)))
+}
+
 type Controller interface {
 	Init(builderFactory func() *ComBuilder, dimensions area, selected bool)
 
@@ -651,7 +665,7 @@ func (v *WindowVisitor) Next() Window {
 	}
 }
 
-func InitTerminalLoop() (root Window, quit chan struct{}, globalInput chan byte) {
+func InitTerminalLoop(controllerFactories map[string]func() Controller) (root Window, quit chan struct{}, globalInput chan byte) {
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		fmt.Println(err)
@@ -667,7 +681,7 @@ func InitTerminalLoop() (root Window, quit chan struct{}, globalInput chan byte)
 	root = &BaseWindow{nil, Box{1, 1, 0, 0}, commands, nil, true, false}
 	dimensions := make(chan int)
 	leftover := make(chan byte, 8)
-	go inputLoop(root, leftover, dimensions, quitChan)
+	go inputLoop(root, leftover, dimensions, quitChan, controllerFactories)
 
 	GetDimensions := GetWindowDimensionsFunc(commands, dimensions)
 	w, h := GetDimensions()
@@ -723,7 +737,7 @@ func endTerminalLoop(oldState *term.State) {
 	term.Restore(int(os.Stdin.Fd()), oldState)
 }
 
-func inputLoop(root Window, input chan byte, dimensionsChan chan int, quitChan chan struct{}) {
+func inputLoop(root Window, input chan byte, dimensionsChan chan int, quitChan chan struct{}, controllerFactories map[string]func() Controller) {
 	visitor := NewWindowVisitor(root)
 
 	char := make([]byte, 1)
@@ -761,11 +775,11 @@ func inputLoop(root Window, input chan byte, dimensionsChan chan int, quitChan c
 				quitChan <- struct{}{}
 				return
 			case KEY_HSPLIT:
-				HSplit(visitor.Current()).SetController(NewBorderedWindowController(" New ", nil))
+				setNew(HSplit(visitor.Current()), controllerFactories)
 			case KEY_VSPLIT:
-				VSplit(visitor.Current()).SetController(NewBorderedWindowController(" New ", nil))
+				setNew(VSplit(visitor.Current()), controllerFactories)
 			case KEY_ADDSIB:
-				addSibling(visitor.Current()).SetController(NewBorderedWindowController(" New ", nil))
+				setNew(addSibling(visitor.Current()), controllerFactories)
 			default:
 				if !visitor.Current().ResolveInput(in) {
 					input <- in

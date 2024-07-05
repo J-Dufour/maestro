@@ -371,3 +371,112 @@ func DrawTrack(builder *ComBuilder, source audio.Metadata, pos int64, trackHeigh
 
 	builder.MoveTo(1, uint(trackHeight)).Write(LINE_START, strings.Repeat(string(LINE_MID), dims.w-2), LINE_END).MoveTo(uint(realPos)+1, uint(trackHeight)).Write(cursor).Exec()
 }
+
+// TODO: add new window to select from other windows
+type SelectorWindowController struct {
+	options []struct {
+		title   string
+		factory func() Controller
+	}
+	idx int
+
+	setController func(Controller)
+
+	w, h int
+
+	newCom func() *ComBuilder
+}
+
+const (
+	KEY_DOWN   = 'j'
+	KEY_UP     = 'k'
+	KEY_SELECT = '\x0D'
+)
+
+func NewSelectorWindowController(possibleControllers []struct {
+	title   string
+	factory func() Controller
+}, setController func(Controller)) Controller {
+	return &SelectorWindowController{
+		options:       possibleControllers,
+		idx:           0,
+		setController: setController,
+		w:             0,
+		h:             0,
+		newCom:        nil,
+	}
+}
+
+func (s *SelectorWindowController) Init(builderFactory func() *ComBuilder, dimensions area, selected bool) {
+	s.newCom = builderFactory
+	s.w, s.h = dimensions.w, dimensions.h
+	s.draw()
+}
+
+func (s *SelectorWindowController) Resize(w, h int) {
+	s.w, s.h = w, h
+	s.draw()
+}
+
+func (s *SelectorWindowController) ResolveInput(b byte) bool {
+	switch b {
+	case KEY_DOWN:
+		if s.idx < len(s.options)-1 {
+			s.idx++
+		}
+		s.draw()
+	case KEY_UP:
+		if s.idx > 0 {
+			s.idx--
+		}
+		s.draw()
+	case KEY_SELECT:
+		s.setController(s.options[s.idx].factory())
+	default:
+		return false
+	}
+	return true
+}
+
+func (s *SelectorWindowController) draw() {
+
+	builder := s.newCom()
+	list := make([]string, 0)
+	idx := s.idx
+	if len(s.options) > s.h {
+		if idx > s.h {
+			shift := idx - s.h + 1
+			for _, v := range s.options[shift : shift+s.h] {
+				list = append(list, v.title)
+			}
+			idx = s.h
+		}
+
+	} else {
+		for _, v := range s.options {
+			list = append(list, v.title)
+		}
+	}
+
+	for i, title := range list {
+		if i == idx {
+			builder.SelectGraphicsRendition(NEGATIVE).Write(title).SelectGraphicsRendition(POSITIVE).MoveLines(1)
+		} else {
+			builder.Write(title).MoveLines(1)
+		}
+	}
+
+	builder.Exec()
+}
+
+func (s *SelectorWindowController) Select()    {}
+func (s *SelectorWindowController) Deselect()  {}
+func (s *SelectorWindowController) Terminate() {}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	} else {
+		return b
+	}
+}

@@ -75,7 +75,12 @@ func main() {
 	}
 
 	// start UI
-	pWin, done, input := InitTerminalLoop()
+	controllerFactories := map[string]func() Controller{
+		"Queue":  func() Controller { return NewBorderedWindowController(" Queue ", NewQueueWindowController(player)) },
+		"Player": func() Controller { return NewBorderedWindowController(" Player ", NewPlayerWindowController(player)) },
+	}
+
+	pWin, done, input := InitTerminalLoop(controllerFactories)
 
 	// start input interpreter
 	go inputDecoder(input, player)
