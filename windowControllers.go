@@ -96,47 +96,60 @@ func (b *BorderedWindowController) Init(builderFactory func() *ComBuilder, dimen
 	b.selected = selected
 
 	b.Draw()
+	if b.inner != nil {
+		innerFactory := func() *ComBuilder {
+			return builderFactory().PermaOffset(1, 1).ChangeDimensions(uint(b.w-2), uint(b.h-2))
+		}
 
-	innerFactory := func() *ComBuilder {
-		return builderFactory().PermaOffset(1, 1).ChangeDimensions(uint(b.w-2), uint(b.h-2))
+		b.inner.Init(innerFactory, area{b.w - 2, b.h - 2}, selected)
 	}
-
-	b.inner.Init(innerFactory, area{b.w - 2, b.h - 2}, selected)
 }
 
 func (b *BorderedWindowController) Select() {
 	b.selected = true
 	b.Draw()
 
-	b.inner.Select()
+	if b.inner != nil {
+		b.inner.Select()
+	}
 }
 
 func (b *BorderedWindowController) Deselect() {
 	b.selected = false
 	b.Draw()
 
-	b.inner.Deselect()
+	if b.inner != nil {
+		b.inner.Deselect()
+	}
 }
 
 func (b *BorderedWindowController) Resize(w, h int) {
 	b.w, b.h = w, h
 	b.Draw()
 
-	if w < 2 {
-		w = 2
+	if b.inner != nil {
+		if w < 2 {
+			w = 2
+		}
+		if h < 2 {
+			h = 2
+		}
+		b.inner.Resize(w-2, h-2)
 	}
-	if h < 2 {
-		h = 2
-	}
-	b.inner.Resize(w-2, h-2)
 }
 
 func (b *BorderedWindowController) ResolveInput(by byte) bool {
-	return b.inner.ResolveInput(by)
+	if b.inner != nil {
+		return b.inner.ResolveInput(by)
+	} else {
+		return false
+	}
 }
 
 func (b *BorderedWindowController) Terminate() {
-	b.inner.Terminate()
+	if b.inner != nil {
+		b.inner.Terminate()
+	}
 }
 
 func (b *BorderedWindowController) Draw() {

@@ -761,11 +761,11 @@ func inputLoop(root Window, input chan byte, dimensionsChan chan int, quitChan c
 				quitChan <- struct{}{}
 				return
 			case KEY_HSPLIT:
-				HSplit(visitor.Current())
+				HSplit(visitor.Current()).SetController(NewBorderedWindowController(" New ", nil))
 			case KEY_VSPLIT:
-				VSplit(visitor.Current())
+				VSplit(visitor.Current()).SetController(NewBorderedWindowController(" New ", nil))
 			case KEY_ADDSIB:
-				addSibling(visitor.Current())
+				addSibling(visitor.Current()).SetController(NewBorderedWindowController(" New ", nil))
 			default:
 				if !visitor.Current().ResolveInput(in) {
 					input <- in
