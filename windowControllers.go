@@ -472,11 +472,3 @@ func (s *SelectorWindowController) draw() {
 func (s *SelectorWindowController) Select()    {}
 func (s *SelectorWindowController) Deselect()  {}
 func (s *SelectorWindowController) Terminate() {}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	} else {
-		return b
-	}
-}
