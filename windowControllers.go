@@ -252,7 +252,12 @@ func NewPlayerWindowController(player *audio.Player) Controller {
 		songUpdated := make(chan struct{})
 		player.SubscribeToSourceChange(songUpdated)
 
-		curSource := *audio.NewMetadata()
+		var curSource audio.Metadata
+		if idx := player.GetPositionInQueue(); 0 <= idx && idx < len(player.GetQueue()) {
+			curSource = player.GetQueue()[player.GetPositionInQueue()]
+		} else {
+			curSource = *audio.NewMetadata()
+		}
 
 		dims := area{0, 0}
 		infoLines := []int{1}
@@ -263,7 +268,9 @@ func NewPlayerWindowController(player *audio.Player) Controller {
 		for {
 			select {
 			case <-songUpdated:
-				curSource = player.GetQueue()[player.GetPositionInQueue()]
+				if idx := player.GetPositionInQueue(); 0 <= idx && idx < len(player.GetQueue()) {
+					curSource = player.GetQueue()[player.GetPositionInQueue()]
+				}
 				DrawInfo(buildCom(), curSource, infoLines, int64(player.GetPositionInTrack()), dims)
 
 			case newDims := <-con.ResizeChan:
