@@ -629,6 +629,7 @@ type WindowVisitor struct {
 }
 
 func NewWindowVisitor(win Window) *WindowVisitor {
+	win.Select()
 	return &WindowVisitor{win, []int{-1}}
 }
 
