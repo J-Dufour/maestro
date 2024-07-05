@@ -597,7 +597,7 @@ func addSibling(child Window) Window {
 	return out
 }
 
-func setNew(w Window, options map[string]func() Controller) {
+func setNew(w Window, v *WindowVisitor, options map[string]func() Controller) {
 	out := make([]struct {
 		title   string
 		factory func() Controller
@@ -609,6 +609,7 @@ func setNew(w Window, options map[string]func() Controller) {
 		}{k, v})
 	}
 	w.SetController(NewBorderedWindowController(" New ", NewSelectorWindowController(out, w.SetController)))
+	v.TravelTo(w)
 }
 
 type Controller interface {
@@ -636,6 +637,9 @@ func (v *WindowVisitor) Current() Window {
 }
 
 func (v *WindowVisitor) Next() Window {
+	// deselect current
+	v.cur.Deselect()
+
 	// increment latest idx
 	last := len(v.history) - 1
 	v.history[last]++
@@ -659,9 +663,24 @@ func (v *WindowVisitor) Next() Window {
 	}
 	v.history = append(v.history, -1)
 	if v.cur.isSelectable() {
+		// select
+		v.cur.Select()
 		return v.cur
 	} else {
 		return v.Next()
+	}
+}
+
+func (v *WindowVisitor) TravelTo(w Window) {
+	if w == v.cur {
+		return
+	}
+	start := v.cur
+	for v.Next() != start {
+
+		if v.cur == w {
+			return
+		}
 	}
 }
 
@@ -775,11 +794,11 @@ func inputLoop(root Window, input chan byte, dimensionsChan chan int, quitChan c
 				quitChan <- struct{}{}
 				return
 			case KEY_HSPLIT:
-				setNew(HSplit(visitor.Current()), controllerFactories)
+				setNew(HSplit(visitor.Current()), visitor, controllerFactories)
 			case KEY_VSPLIT:
-				setNew(VSplit(visitor.Current()), controllerFactories)
+				setNew(VSplit(visitor.Current()), visitor, controllerFactories)
 			case KEY_ADDSIB:
-				setNew(addSibling(visitor.Current()), controllerFactories)
+				setNew(addSibling(visitor.Current()), visitor, controllerFactories)
 			default:
 				if !visitor.Current().ResolveInput(in) {
 					input <- in
