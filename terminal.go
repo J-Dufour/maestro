@@ -764,6 +764,8 @@ func inputLoop(root Window, input chan byte, dimensionsChan chan int, quitChan c
 				HSplit(visitor.Current())
 			case KEY_VSPLIT:
 				VSplit(visitor.Current())
+			case KEY_ADDSIB:
+				addSibling(visitor.Current())
 			default:
 				if !visitor.Current().ResolveInput(in) {
 					input <- in

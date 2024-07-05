@@ -22,6 +22,7 @@ const (
 	KEY_CYCLE  = 'c'
 	KEY_HSPLIT = 'x'
 	KEY_VSPLIT = 'z'
+	KEY_ADDSIB = 's'
 )
 
 func main() {
