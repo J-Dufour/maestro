@@ -574,15 +574,26 @@ func (win *BaseWindow) GetChildren() []Window {
 
 func HSplit(w Window) Window {
 	w.Encapsulate(NewHorizontalStackWindow)
-	out := w.GetParent().NewChild()
-	out.SetSelectable(true)
-	return out
+	return addSibling(w)
 }
 
 func VSplit(w Window) Window {
 	w.Encapsulate(NewVerticalStackWindow)
-	out := w.GetParent().NewChild()
-	out.SetSelectable(true)
+	return addSibling(w)
+}
+
+func addSibling(child Window) Window {
+	if child.GetParent() == nil {
+		return nil
+	}
+
+	out := child.GetParent().NewChild()
+	root := GetRoot(child)
+	w, h := root.GetDimensions()
+	rootBox := Box{1, 1, uint(w), uint(h)}
+	root.GetOffsetComBuilder().Clear().Exec()
+	root.Resize(rootBox)
+
 	return out
 }
 
