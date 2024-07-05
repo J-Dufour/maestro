@@ -236,7 +236,7 @@ type Window interface {
 	getBox() Box
 	Resize(b Box)
 
-	GetOffsetComBuilder() *ComBuilder
+	GetComBuilder() *ComBuilder
 	Exec(Com)
 
 	SetController(Controller)
@@ -472,10 +472,10 @@ func (win *BaseWindow) WithinBounds(box Box) bool {
 
 }
 
-func (win *BaseWindow) GetOffsetComBuilder() *ComBuilder {
+func (win *BaseWindow) GetComBuilder() *ComBuilder {
 	var cb *ComBuilder
 	if win.parent != nil {
-		cb = win.parent.GetOffsetComBuilder()
+		cb = win.parent.GetComBuilder()
 
 		//Offset
 		cb.PermaOffset(win.x, win.y)
@@ -515,10 +515,10 @@ func (win *BaseWindow) SetController(c Controller) {
 	if win.con != nil {
 		win.con.Terminate()
 	}
-	win.GetOffsetComBuilder().Clear().Exec()
+	win.GetComBuilder().Clear().Exec()
 	// initiate new controller
 	win.con = c
-	win.con.Init(win.GetOffsetComBuilder, area{int(win.w), int(win.h)}, win.selected)
+	win.con.Init(win.GetComBuilder, area{int(win.w), int(win.h)}, win.selected)
 }
 
 func (win *BaseWindow) Select() {
@@ -591,7 +591,7 @@ func addSibling(child Window) Window {
 	root := GetRoot(child)
 	w, h := root.GetDimensions()
 	rootBox := Box{1, 1, uint(w), uint(h)}
-	root.GetOffsetComBuilder().Clear().Exec()
+	root.GetComBuilder().Clear().Exec()
 	root.Resize(rootBox)
 
 	return out
@@ -723,7 +723,7 @@ func InitTerminalLoop(controllerFactories map[string]func() Controller) (root Wi
 			}
 		}
 	}()
-	root.GetOffsetComBuilder().Clear().Exec()
+	root.GetComBuilder().Clear().Exec()
 	return root, doneChan, leftover
 }
 
