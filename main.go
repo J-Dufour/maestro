@@ -19,8 +19,9 @@ const (
 	KEY_SEEKF  = '.'
 	KEY_SEEKB  = ','
 
-	KEY_CYCLE = 'c'
-	KEY_SPLIT = 's'
+	KEY_CYCLE  = 'c'
+	KEY_HSPLIT = 'x'
+	KEY_VSPLIT = 'z'
 )
 
 func main() {

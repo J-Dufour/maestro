@@ -760,8 +760,10 @@ func inputLoop(root Window, input chan byte, dimensionsChan chan int, quitChan c
 			case KEY_QUIT:
 				quitChan <- struct{}{}
 				return
-			case KEY_SPLIT:
+			case KEY_HSPLIT:
 				HSplit(visitor.Current())
+			case KEY_VSPLIT:
+				VSplit(visitor.Current())
 			default:
 				if !visitor.Current().ResolveInput(in) {
 					input <- in
