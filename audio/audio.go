@@ -326,6 +326,7 @@ func (player *Player) playerThread() {
 				// set new position
 				curSource.SetPosition(int64(newPos))
 				player.trackPosition = newPos
+				lastKnownTS = player.trackPosition
 
 				// clear buffer
 				player.client.ClearBuffer()
