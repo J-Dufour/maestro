@@ -30,10 +30,10 @@ type BaseWindowController struct {
 
 	ControllerChannels
 
-	loop func(func() *ComBuilder, ControllerChannels)
+	loop func(func() *CommandBuilder, ControllerChannels)
 }
 
-func NewBaseWindowController(loop func(func() *ComBuilder, ControllerChannels), inputRange string) *BaseWindowController {
+func NewBaseWindowController(loop func(func() *CommandBuilder, ControllerChannels), inputRange string) *BaseWindowController {
 	out := &BaseWindowController{}
 
 	out.ControllerChannels = NewControllerChannels()
@@ -43,7 +43,7 @@ func NewBaseWindowController(loop func(func() *ComBuilder, ControllerChannels), 
 	return out
 }
 
-func (c *BaseWindowController) Init(builderFactory func() *ComBuilder, dimensions area, selected bool) {
+func (c *BaseWindowController) Init(builderFactory func() *CommandBuilder, dimensions area, selected bool) {
 	go c.loop(builderFactory, c.ControllerChannels)
 	c.ResizeChan <- dimensions
 	if selected {
@@ -72,10 +72,10 @@ func (c *BaseWindowController) Terminate() {
 }
 
 type BorderedWindowController struct {
-	newCom   func() *ComBuilder
-	title    string
-	w, h     int
-	selected bool
+	newCommand func() *CommandBuilder
+	title      string
+	w, h       int
+	selected   bool
 
 	inner Controller
 }
@@ -84,8 +84,8 @@ func NewBorderedWindowController(title string, inner Controller) Controller {
 	return &BorderedWindowController{nil, title, 0, 0, false, inner}
 }
 
-func (b *BorderedWindowController) Init(builderFactory func() *ComBuilder, dimensions area, selected bool) {
-	b.newCom = builderFactory
+func (b *BorderedWindowController) Init(builderFactory func() *CommandBuilder, dimensions area, selected bool) {
+	b.newCommand = builderFactory
 
 	b.w, b.h = dimensions.w, dimensions.h
 
@@ -93,7 +93,7 @@ func (b *BorderedWindowController) Init(builderFactory func() *ComBuilder, dimen
 
 	b.Draw()
 	if b.inner != nil {
-		innerFactory := func() *ComBuilder {
+		innerFactory := func() *CommandBuilder {
 			return builderFactory().PermaOffset(1, 1).ChangeDimensions(uint(b.w-2), uint(b.h-2))
 		}
 
@@ -149,11 +149,11 @@ func (b *BorderedWindowController) Terminate() {
 }
 
 func (b *BorderedWindowController) Draw() {
-	b.newCom().DrawBox(Box{0, 0, uint(b.w), uint(b.h)}, b.title, b.selected).Exec()
+	b.newCommand().DrawBox(Box{0, 0, uint(b.w), uint(b.h)}, b.title, b.selected).Exec()
 }
 
 func NewQueueWindowController(player *audio.Player) Controller {
-	return NewBaseWindowController(func(buildCom func() *ComBuilder, con ControllerChannels) {
+	return NewBaseWindowController(func(buildCommand func() *CommandBuilder, con ControllerChannels) {
 		queueUpdated := make(chan struct{})
 		songUpdated := make(chan struct{})
 
@@ -174,10 +174,10 @@ func NewQueueWindowController(player *audio.Player) Controller {
 				} else {
 					maxIdxLen = 1 + int(math.Log10(float64(length)))
 				}
-				DrawQueue(buildCom(), queue, curIdx, maxIdxLen, dims.w, dims.h)
+				DrawQueue(buildCommand(), queue, curIdx, maxIdxLen, dims.w, dims.h)
 
 			case <-songUpdated:
-				builder := buildCom()
+				builder := buildCommand()
 				if curIdx < len(queue) {
 					builder.MoveTo(1, uint(curIdx+1))
 					WriteQueueLine(builder, curIdx+1, maxIdxLen, queue[curIdx], dims.w-2-maxIdxLen, false)
@@ -191,7 +191,7 @@ func NewQueueWindowController(player *audio.Player) Controller {
 
 			case newDims := <-con.ResizeChan:
 				dims = newDims
-				DrawQueue(buildCom(), queue, curIdx, maxIdxLen, dims.w, dims.h)
+				DrawQueue(buildCommand(), queue, curIdx, maxIdxLen, dims.w, dims.h)
 			case <-con.TerminateChan:
 				return
 			case <-con.SelectChan:
@@ -201,7 +201,7 @@ func NewQueueWindowController(player *audio.Player) Controller {
 	}, "")
 }
 
-func DrawQueue(builder *ComBuilder, queue []audio.Metadata, curIdx, maxIdxLen, w, h int) {
+func DrawQueue(builder *CommandBuilder, queue []audio.Metadata, curIdx, maxIdxLen, w, h int) {
 	maxTitleLen := w - maxIdxLen - 2
 
 	// draw queue
@@ -215,7 +215,7 @@ func DrawQueue(builder *ComBuilder, queue []audio.Metadata, curIdx, maxIdxLen, w
 	builder.Exec()
 }
 
-func WriteQueueLine(builder *ComBuilder, idx int, maxIdx int, metadata audio.Metadata, maxW int, highlighted bool) *ComBuilder {
+func WriteQueueLine(builder *CommandBuilder, idx int, maxIdx int, metadata audio.Metadata, maxW int, highlighted bool) *CommandBuilder {
 	graphics := POSITIVE
 	if highlighted {
 		graphics = NEGATIVE
@@ -244,7 +244,7 @@ const (
 )
 
 func NewPlayerWindowController(player *audio.Player) Controller {
-	return NewBaseWindowController(func(buildCom func() *ComBuilder, con ControllerChannels) {
+	return NewBaseWindowController(func(buildCommand func() *CommandBuilder, con ControllerChannels) {
 		songUpdated := make(chan struct{})
 		player.SubscribeToSourceChange(songUpdated)
 
@@ -267,14 +267,14 @@ func NewPlayerWindowController(player *audio.Player) Controller {
 				if idx := player.GetPositionInQueue(); 0 <= idx && idx < len(player.GetQueue()) {
 					curSource = player.GetQueue()[player.GetPositionInQueue()]
 				}
-				DrawInfo(buildCom(), curSource, infoLines, int64(player.GetPositionInTrack()), dims)
+				DrawInfo(buildCommand(), curSource, infoLines, int64(player.GetPositionInTrack()), dims)
 
 			case newDims := <-con.ResizeChan:
 				dims = newDims
 				infoLines = infoLinesFromHeight(dims.h)
-				DrawInfo(buildCom(), curSource, infoLines, int64(player.GetPositionInTrack()), dims)
+				DrawInfo(buildCommand(), curSource, infoLines, int64(player.GetPositionInTrack()), dims)
 			case <-clock.C:
-				DrawTrack(buildCom(), curSource, int64(player.GetPositionInTrack()), infoLines[len(infoLines)-1], dims)
+				DrawTrack(buildCommand(), curSource, int64(player.GetPositionInTrack()), infoLines[len(infoLines)-1], dims)
 			case <-con.TerminateChan:
 				return
 			case <-con.SelectChan:
@@ -301,12 +301,12 @@ func infoLinesFromHeight(h int) []int {
 	}
 }
 
-func DrawInfo(builder *ComBuilder, source audio.Metadata, lines []int, pos int64, dims area) {
+func DrawInfo(builder *CommandBuilder, source audio.Metadata, lines []int, pos int64, dims area) {
 	lastIdx := len(lines) - 1
 	DrawMetadata(builder, source, lines[:lastIdx], dims)
 	DrawTrack(builder, source, pos, lines[lastIdx], dims)
 }
-func DrawMetadata(builder *ComBuilder, source audio.Metadata, lines []int, dims area) {
+func DrawMetadata(builder *CommandBuilder, source audio.Metadata, lines []int, dims area) {
 	//draw
 	switch len(lines) {
 	case 0:
@@ -350,7 +350,7 @@ func centeredString(str string, width int) string {
 
 }
 
-func DrawTrack(builder *ComBuilder, source audio.Metadata, pos int64, trackHeight int, dims area) {
+func DrawTrack(builder *CommandBuilder, source audio.Metadata, pos int64, trackHeight int, dims area) {
 	duration := source.Duration
 	var realPos int
 	if duration == 0 {
@@ -387,7 +387,7 @@ type SelectorWindowController struct {
 
 	w, h int
 
-	newCom func() *ComBuilder
+	newCommand func() *CommandBuilder
 }
 
 const (
@@ -406,12 +406,12 @@ func NewSelectorWindowController(possibleControllers []struct {
 		setController: setController,
 		w:             0,
 		h:             0,
-		newCom:        nil,
+		newCommand:    nil,
 	}
 }
 
-func (s *SelectorWindowController) Init(builderFactory func() *ComBuilder, dimensions area, selected bool) {
-	s.newCom = builderFactory
+func (s *SelectorWindowController) Init(builderFactory func() *CommandBuilder, dimensions area, selected bool) {
+	s.newCommand = builderFactory
 	s.w, s.h = dimensions.w, dimensions.h
 	s.draw()
 }
@@ -443,7 +443,7 @@ func (s *SelectorWindowController) ResolveInput(b byte) bool {
 
 func (s *SelectorWindowController) draw() {
 
-	builder := s.newCom()
+	builder := s.newCommand()
 	list := make([]string, 0)
 	idx := s.idx
 	if len(s.options) > s.h {

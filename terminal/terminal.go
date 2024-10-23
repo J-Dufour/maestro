@@ -97,21 +97,21 @@ type Box struct {
 	h uint
 }
 
-type Com string
-type ComBuilder struct {
+type Command string
+type CommandBuilder struct {
 	canvas  Box
 	builder *strings.Builder
-	channel chan Com
+	channel chan Command
 }
 
-func NewCom() *ComBuilder { return &ComBuilder{} }
+func NewCommand() *CommandBuilder { return &CommandBuilder{} }
 
-func (cb *ComBuilder) MoveTo(x uint, y uint) *ComBuilder {
+func (cb *CommandBuilder) MoveTo(x uint, y uint) *CommandBuilder {
 	cb.builder.WriteString(fmt.Sprintf("%c[%d;%dH", ESC, cb.canvas.y+y, cb.canvas.x+x))
 	return cb
 }
 
-func (cb *ComBuilder) Offset(x int, y int) *ComBuilder {
+func (cb *CommandBuilder) Offset(x int, y int) *CommandBuilder {
 	if x > 0 {
 		cb.builder.WriteString(fmt.Sprintf("%c[%dC", ESC, x))
 	} else if x < 0 {
@@ -127,7 +127,7 @@ func (cb *ComBuilder) Offset(x int, y int) *ComBuilder {
 	return cb
 }
 
-func (cb *ComBuilder) Write(text ...any) *ComBuilder {
+func (cb *CommandBuilder) Write(text ...any) *CommandBuilder {
 	for _, t := range text {
 		switch t := t.(type) {
 		case string:
@@ -144,7 +144,7 @@ func (cb *ComBuilder) Write(text ...any) *ComBuilder {
 	return cb
 }
 
-func (cb *ComBuilder) MoveLines(lines int) *ComBuilder {
+func (cb *CommandBuilder) MoveLines(lines int) *CommandBuilder {
 	if lines > 0 {
 		cb.builder.WriteString(fmt.Sprintf("%c[%dE", ESC, lines))
 		cb.Offset(int(cb.canvas.x), 0)
@@ -155,7 +155,7 @@ func (cb *ComBuilder) MoveLines(lines int) *ComBuilder {
 	return cb
 }
 
-func (cb *ComBuilder) Clear() *ComBuilder {
+func (cb *CommandBuilder) Clear() *CommandBuilder {
 	clearString := strings.Repeat(" ", int(cb.canvas.w))
 	cb.MoveTo(1, 1)
 	for i := 0; i < int(cb.canvas.h); i++ {
@@ -166,11 +166,11 @@ func (cb *ComBuilder) Clear() *ComBuilder {
 	return cb
 }
 
-func (cb *ComBuilder) BuildCom() Com {
-	return Com(cb.builder.String())
+func (cb *CommandBuilder) BuildCommand() Command {
+	return Command(cb.builder.String())
 }
 
-func (cb *ComBuilder) DrawBox(box Box, title string, highlighted bool) *ComBuilder {
+func (cb *CommandBuilder) DrawBox(box Box, title string, highlighted bool) *CommandBuilder {
 	//ensure width fits title
 	if len(title) > int(box.w)-2 || box.h < 2 {
 		return cb
@@ -192,7 +192,7 @@ func (cb *ComBuilder) DrawBox(box Box, title string, highlighted bool) *ComBuild
 	return cb.MoveLines(1).Offset(int(box.x), 0).Write(BOX_S_BL, strings.Repeat(string(BOX_S_H), int(box.w)-2), BOX_S_BR)
 }
 
-func (cb *ComBuilder) SelectGraphicsRendition(formatOptions ...int) *ComBuilder {
+func (cb *CommandBuilder) SelectGraphicsRendition(formatOptions ...int) *CommandBuilder {
 	if len(formatOptions) < 1 {
 		return cb
 	}
@@ -204,26 +204,26 @@ func (cb *ComBuilder) SelectGraphicsRendition(formatOptions ...int) *ComBuilder 
 	return cb
 }
 
-func (cb *ComBuilder) ClearGraphicsRendition() *ComBuilder {
+func (cb *CommandBuilder) ClearGraphicsRendition() *CommandBuilder {
 	cb.builder.WriteRune(ESC)
 	cb.builder.WriteString("[0m")
 	return cb
 }
 
-func (cb *ComBuilder) PermaOffset(x, y uint) *ComBuilder {
+func (cb *CommandBuilder) PermaOffset(x, y uint) *CommandBuilder {
 	cb.canvas.x += x
 	cb.canvas.y += y
 	return cb.Offset(int(x), int(y))
 }
 
-func (cb *ComBuilder) ChangeDimensions(w, h uint) *ComBuilder {
+func (cb *CommandBuilder) ChangeDimensions(w, h uint) *CommandBuilder {
 	cb.canvas.w, cb.canvas.h = w, h
 	return cb
 }
 
-func (cb *ComBuilder) Exec() {
+func (cb *CommandBuilder) Exec() {
 	// sends command to window
-	cb.channel <- cb.BuildCom()
+	cb.channel <- cb.BuildCommand()
 }
 
 type parentWindowCreator func(*BaseWindow) ParentWindow
@@ -248,8 +248,8 @@ type Window interface {
 	getBox() Box
 	Resize(b Box)
 
-	GetComBuilder() *ComBuilder
-	Exec(Com)
+	GetCommandBuilder() *CommandBuilder
+	Exec(Command)
 
 	SetController(Controller)
 	ResolveInput(b byte) bool
@@ -311,7 +311,7 @@ func NewVerticalStackWindow(b *BaseWindow) ParentWindow {
 }
 
 func (win *VerticalStackWindow) NewChild() (child Window) {
-	child = &BaseWindow{win, win.Box, win.coms, nil, true, false}
+	child = &BaseWindow{win, win.Box, win.commands, nil, true, false}
 	win.AddChild(child)
 
 	return child
@@ -359,7 +359,7 @@ func NewHorizontalStackWindow(b *BaseWindow) ParentWindow {
 }
 
 func (win *HorizontalStackWindow) NewChild() (child Window) {
-	child = &BaseWindow{win, win.Box, win.coms, nil, true, false}
+	child = &BaseWindow{win, win.Box, win.commands, nil, true, false}
 	win.AddChild(child)
 
 	return child
@@ -416,7 +416,7 @@ func (win *ContainerWindow) NewChild() (child Window) {
 	}
 
 	childBox := Box{1, 1, win.w - 2, win.h - 2}
-	win.AddChild(&BaseWindow{win, childBox, win.coms, win.con, true, false})
+	win.AddChild(&BaseWindow{win, childBox, win.commands, win.con, true, false})
 	return win.child
 }
 
@@ -463,8 +463,8 @@ type BaseWindow struct {
 	parent ParentWindow
 	Box
 
-	coms chan Com
-	con  Controller
+	commands chan Command
+	con      Controller
 
 	selectable bool
 	selected   bool
@@ -484,16 +484,16 @@ func (win *BaseWindow) WithinBounds(box Box) bool {
 
 }
 
-func (win *BaseWindow) GetComBuilder() *ComBuilder {
-	var cb *ComBuilder
+func (win *BaseWindow) GetCommandBuilder() *CommandBuilder {
+	var cb *CommandBuilder
 	if win.parent != nil {
-		cb = win.parent.GetComBuilder()
+		cb = win.parent.GetCommandBuilder()
 
 		//Offset
 		cb.PermaOffset(win.x, win.y)
 		cb.ChangeDimensions(win.w, win.h)
 	} else {
-		cb = &ComBuilder{Box{0, 0, win.w, win.h}, &strings.Builder{}, win.coms}
+		cb = &CommandBuilder{Box{0, 0, win.w, win.h}, &strings.Builder{}, win.commands}
 		cb.MoveTo(0, 0)
 	}
 
@@ -510,7 +510,7 @@ func (win *BaseWindow) Resize(b Box) {
 
 func (win *BaseWindow) Encapsulate(parentCreator parentWindowCreator) {
 
-	newParent := parentCreator(&BaseWindow{win.parent, win.Box, win.coms, nil, false, false})
+	newParent := parentCreator(&BaseWindow{win.parent, win.Box, win.commands, nil, false, false})
 	if win.parent != nil {
 		win.parent.ReplaceChild(win, newParent)
 	}
@@ -518,8 +518,8 @@ func (win *BaseWindow) Encapsulate(parentCreator parentWindowCreator) {
 	win.parent = newParent
 }
 
-func (win *BaseWindow) Exec(com Com) {
-	win.coms <- com
+func (win *BaseWindow) Exec(command Command) {
+	win.commands <- command
 }
 
 func (win *BaseWindow) SetController(c Controller) {
@@ -527,10 +527,10 @@ func (win *BaseWindow) SetController(c Controller) {
 	if win.con != nil {
 		win.con.Terminate()
 	}
-	win.GetComBuilder().Clear().Exec()
+	win.GetCommandBuilder().Clear().Exec()
 	// initiate new controller
 	win.con = c
-	win.con.Init(win.GetComBuilder, area{int(win.w), int(win.h)}, win.selected)
+	win.con.Init(win.GetCommandBuilder, area{int(win.w), int(win.h)}, win.selected)
 }
 
 func (win *BaseWindow) Select() {
@@ -603,7 +603,7 @@ func addSibling(child Window) Window {
 	root := GetRoot(child)
 	w, h := root.GetDimensions()
 	rootBox := Box{1, 1, uint(w), uint(h)}
-	root.GetComBuilder().Clear().Exec()
+	root.GetCommandBuilder().Clear().Exec()
 	root.Resize(rootBox)
 
 	return out
@@ -625,7 +625,7 @@ func setNew(w Window, v *WindowVisitor, options map[string]func() Controller) {
 }
 
 type Controller interface {
-	Init(builderFactory func() *ComBuilder, dimensions area, selected bool)
+	Init(builderFactory func() *CommandBuilder, dimensions area, selected bool)
 
 	Select()
 	Deselect()
@@ -707,7 +707,7 @@ func InitTerminalLoop(controllerFactories map[string]func() Controller) (root Wi
 	//define root window
 	quitChan := make(chan struct{})
 	doneChan := make(chan struct{})
-	commands := make(chan Com)
+	commands := make(chan Command)
 	go terminalLoop(oldState, commands, quitChan, doneChan)
 
 	root = &BaseWindow{nil, Box{1, 1, 0, 0}, commands, nil, true, false}
@@ -735,11 +735,11 @@ func InitTerminalLoop(controllerFactories map[string]func() Controller) (root Wi
 			}
 		}
 	}()
-	root.GetComBuilder().Clear().Exec()
+	root.GetCommandBuilder().Clear().Exec()
 	return root, doneChan, leftover
 }
 
-func terminalLoop(oldState *term.State, commandChan <-chan Com, quitChan <-chan struct{}, doneChan chan<- struct{}) {
+func terminalLoop(oldState *term.State, commandChan <-chan Command, quitChan <-chan struct{}, doneChan chan<- struct{}) {
 	defer endTerminalLoop(oldState)
 
 	// hide cursor
@@ -822,9 +822,9 @@ func inputLoop(root Window, input chan byte, dimensionsChan chan int, quitChan c
 	}
 }
 
-func GetWindowDimensionsFunc(comChan chan<- Com, dimChan <-chan int) func() (int, int) {
+func GetWindowDimensionsFunc(commandChan chan<- Command, dimChan <-chan int) func() (int, int) {
 	return func() (w int, h int) {
-		comChan <- "\x1b[999;999H\x1b[6n\x1b[0;0H"
+		commandChan <- "\x1b[999;999H\x1b[6n\x1b[0;0H"
 		w = <-dimChan
 		h = <-dimChan
 
