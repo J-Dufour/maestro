@@ -7,22 +7,17 @@ import (
 	"slices"
 
 	"github.com/J-Dufour/maestro/audio"
+	"github.com/J-Dufour/maestro/terminal"
 )
 
 var VALID_EXT = []string{".mp3", ".wav"}
 
 const (
-	KEY_QUIT   = 'q'
 	KEY_SKIP   = 'k'
 	KEY_TOGGLE = ' '
 	KEY_BACK   = 'j'
 	KEY_SEEKF  = '.'
 	KEY_SEEKB  = ','
-
-	KEY_CYCLE  = 'c'
-	KEY_HSPLIT = 'x'
-	KEY_VSPLIT = 'z'
-	KEY_ADDSIB = 's'
 )
 
 func main() {
@@ -75,26 +70,30 @@ func main() {
 	}
 
 	// start UI
-	controllerFactories := map[string]func() Controller{
-		"Queue":  func() Controller { return NewBorderedWindowController(" Queue ", NewQueueWindowController(player)) },
-		"Player": func() Controller { return NewBorderedWindowController(" Player ", NewPlayerWindowController(player)) },
+	controllerFactories := map[string]func() terminal.Controller{
+		"Queue": func() terminal.Controller {
+			return terminal.NewBorderedWindowController(" Queue ", terminal.NewQueueWindowController(player))
+		},
+		"Player": func() terminal.Controller {
+			return terminal.NewBorderedWindowController(" Player ", terminal.NewPlayerWindowController(player))
+		},
 	}
 
-	pWin, done, input := InitTerminalLoop(controllerFactories)
+	pWin, done, input := terminal.InitTerminalLoop(controllerFactories)
 
 	// start input interpreter
 	go inputDecoder(input, player)
 
 	// split
-	bottomWin := VSplit(pWin)
+	bottomWin := terminal.VSplit(pWin)
 	bottomWin.SetSelectable(false)
-	qWin := HSplit(pWin)
+	qWin := terminal.HSplit(pWin)
 
 	// make queue view
-	qWin.SetController(NewBorderedWindowController(" Queue ", NewQueueWindowController(player)))
+	qWin.SetController(terminal.NewBorderedWindowController(" Queue ", terminal.NewQueueWindowController(player)))
 
 	// make player view
-	pWin.SetController(NewBorderedWindowController(" Player ", NewPlayerWindowController(player)))
+	pWin.SetController(terminal.NewBorderedWindowController(" Player ", terminal.NewPlayerWindowController(player)))
 
 	player.AddSourcesToQueue(absolutePaths...)
 	player.Start()

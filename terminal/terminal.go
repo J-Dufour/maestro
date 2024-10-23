@@ -1,4 +1,4 @@
-package main
+package terminal
 
 import (
 	"fmt"
@@ -7,6 +7,18 @@ import (
 	"time"
 
 	"golang.org/x/term"
+)
+
+type area struct {
+	w, h int
+}
+
+const (
+	KEY_QUIT   = 'q'
+	KEY_CYCLE  = 'c'
+	KEY_HSPLIT = 'x'
+	KEY_VSPLIT = 'z'
+	KEY_ADDSIB = 's'
 )
 
 const (

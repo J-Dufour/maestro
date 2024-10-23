@@ -1,4 +1,4 @@
-package main
+package terminal
 
 import (
 	"fmt"
@@ -8,10 +8,6 @@ import (
 
 	"github.com/J-Dufour/maestro/audio"
 )
-
-type area struct {
-	w, h int
-}
 
 type ControllerChannels struct {
 	InputChan     chan byte
