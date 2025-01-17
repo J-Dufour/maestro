@@ -396,7 +396,10 @@ func (player *Player) playerThread() {
 			}
 			if totalCopied > 0 {
 				//load into buffer
-				client.LoadToBuffer(acc[:totalCopied])
+				_, err = client.LoadToBuffer(acc[:totalCopied])
+				if err != nil {
+					panic(err)
+				}
 			}
 
 		}
