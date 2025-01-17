@@ -212,7 +212,7 @@ func (a AudioRenderClient) GetBuffer(frames uint32) (buffStart *byte, err error)
 }
 
 func (a AudioRenderClient) ReleaseBuffer(frames uint32) (err error) {
-	r1, _, err := syscall.SyscallN(a.vtbl.releaseBuffer, a.ptr, uintptr(frames))
+	r1, _, err := syscall.SyscallN(a.vtbl.releaseBuffer, a.ptr, uintptr(frames), uintptr(0))
 	if uint32(r1) != uint32(windows.S_OK) {
 		err = errors.New("could not get buffer")
 		return err
