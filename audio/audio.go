@@ -94,6 +94,7 @@ type Player struct {
 	controlDone chan struct{}
 	playing     bool
 
+	curSource     AudioSource
 	trackPosition int // in 100ns units
 
 	queueIn chan string
@@ -119,7 +120,7 @@ func NewPlayer() (player *Player, err error) {
 	player.playing = false
 
 	player.queueIn = make(chan string, 2)
-	player.queue = Queue{make([]QueueItem, 0), -1}
+	player.queue = Queue{make([]QueueItem, 0), make([]QueueItem, 0)}
 
 	player.queueUpdateSubscribers = make([]chan<- struct{}, 0)
 	player.sourceChangeSubscribers = make([]chan<- struct{}, 0)
@@ -193,12 +194,16 @@ func (p *Player) AddSourcesToQueue(sources ...string) {
 	}
 }
 
-func (p *Player) GetQueue() []Metadata {
-	return p.queue.GetDataQueue()
+func (p *Player) GetQueue(lookBehind int) []Metadata {
+	return p.queue.GetDataQueue(lookBehind)
 }
 
-func (p *Player) GetPositionInQueue() int {
-	return p.queue.idx
+func (p *Player) GetCurrentSourceMetadata() Metadata {
+	if p.curSource != nil {
+		return p.curSource.GetMetadata()
+	} else {
+		return *NewMetadata()
+	}
 }
 
 func (p *Player) GetPositionInTrack() int {
@@ -231,8 +236,6 @@ func (player *Player) playerThread() {
 	client := player.client
 	format := client.GetPCMWaveFormat()
 
-	//initialize audio queue
-	var curSource AudioSource
 	waitingForNextTrack := true
 
 	// get max buffer size
@@ -265,7 +268,7 @@ func (player *Player) playerThread() {
 			player.queue.AddSourcePath(source, player.format)
 			player.publishQueueUpdate()
 			if waitingForNextTrack {
-				curSource, waitingForNextTrack = player.queue.NextSource()
+				player.curSource, waitingForNextTrack = player.queue.NextSource()
 				if waitingForNextTrack {
 					break
 				}
@@ -293,20 +296,22 @@ func (player *Player) playerThread() {
 				if amt == 0 { //if skipping 0 songs, or if index is already waiting, skip
 					player.controlDone <- struct{}{}
 					break
+				} else if amt > 1 {
+					player.queue.RemoveNextItems(amt - 1)
+				} else if amt < 0 {
+					player.queue.SeekBackwards(-amt + 1)
 				}
-
-				player.queue.SkipIdx(amt)
 
 				// interrupt current song
 				leftover = leftover[:0]
 				client.ClearBuffer()
 
-				curSource.SetPosition(0)
-				curSource, waitingForNextTrack = player.queue.NextSource()
+				player.curSource.SetPosition(0)
+				player.curSource, waitingForNextTrack = player.queue.NextSource()
 
 				if waitingForNextTrack {
-					curSource.SetPosition(int64(curSource.GetMetadata().Duration))
-					player.trackPosition = int(curSource.GetMetadata().Duration)
+					player.curSource.SetPosition(int64(player.curSource.GetMetadata().Duration))
+					player.trackPosition = int(player.curSource.GetMetadata().Duration)
 					clock.Stop()
 				} else {
 					// play next song
@@ -321,10 +326,10 @@ func (player *Player) playerThread() {
 				// find new position
 				amt := <-player.control
 				newPos := player.trackPosition + amt
-				newPos = Clamp(newPos, 0, int(curSource.GetMetadata().Duration))
+				newPos = Clamp(newPos, 0, int(player.curSource.GetMetadata().Duration))
 
 				// set new position
-				curSource.SetPosition(int64(newPos))
+				player.curSource.SetPosition(int64(newPos))
 				player.trackPosition = newPos
 				lastKnownTS = player.trackPosition
 
@@ -335,7 +340,7 @@ func (player *Player) playerThread() {
 				player.controlDone <- struct{}{}
 
 			case CTL_SEEK_TO:
-				curSource.SetPosition(int64(<-player.control))
+				player.curSource.SetPosition(int64(<-player.control))
 				client.ClearBuffer()
 				leftover = leftover[:0]
 				player.controlDone <- struct{}{}
@@ -356,8 +361,8 @@ func (player *Player) playerThread() {
 				reachedEOF = false
 
 				// exit and move to next song
-				curSource.SetPosition(0)
-				curSource, waitingForNextTrack = player.queue.NextSource()
+				player.curSource.SetPosition(0)
+				player.curSource, waitingForNextTrack = player.queue.NextSource()
 
 				player.trackPosition = 0
 				lastKnownTS = 0
@@ -380,7 +385,7 @@ func (player *Player) playerThread() {
 
 			//load new data
 			for i := 0; totalCopied < freeFrames*frameSize; i++ {
-				frames, timestamp, err := curSource.ReadNext()
+				frames, timestamp, err := player.curSource.ReadNext()
 				if err == io.EOF {
 					reachedEOF = true
 					break
@@ -407,8 +412,8 @@ func (player *Player) playerThread() {
 }
 
 type Queue struct {
-	queue []QueueItem
-	idx   int
+	prevQ []QueueItem
+	nextQ []QueueItem
 }
 
 func (q *Queue) AddSourcePath(path string, format *PCMWaveFormat) {
@@ -417,32 +422,57 @@ func (q *Queue) AddSourcePath(path string, format *PCMWaveFormat) {
 		metadata := NewMetadata()
 		metadata.Filepath = path
 	}
-	q.queue = append(q.queue, QueueItem{*metadata, format, nil})
+	q.nextQ = append(q.nextQ, QueueItem{*metadata, format, nil})
 }
 
 func (q *Queue) NextSource() (s AudioSource, endOfQueue bool) {
+
 	// find next valid source
-	err := errors.New("test")
-	var source AudioSource
-	for err != nil && q.idx < len(q.queue) {
-		q.idx++
-		source, err = q.queue[q.idx].Source()
+	var nextItem QueueItem
+	err := errors.New("")
+	for len(q.nextQ) > 0 && err != nil {
+		nextItem = q.nextQ[0]
+		_, err = nextItem.Source()
+		q.nextQ = q.nextQ[1:]
 	}
-	if q.idx == len(q.queue) {
-		return nil, true
-	}
-	return source, false
+	q.prevQ = append(q.prevQ, nextItem)
+	s, _ = nextItem.Source()
+	return s, (len(q.nextQ) == 0 && s == nil)
 }
 
 // moves idx such that the next song is [amt] away from current song
-func (q *Queue) SkipIdx(amt int) {
-	q.idx = Clamp(q.idx+amt-1, -1, len(q.queue))
+func (q *Queue) RemoveNextItems(amt int) {
+	if amt <= 0 {
+		return
+	}
+
+	q.nextQ = q.nextQ[amt:]
 }
 
-func (q *Queue) GetDataQueue() []Metadata {
-	out := make([]Metadata, len(q.queue))
-	for i, item := range q.queue {
-		out[i] = item.metadata
+func (q *Queue) SeekBackwards(amt int) {
+	if amt <= 0 {
+		return
+	}
+
+	q.nextQ = append(q.prevQ[len(q.prevQ)-amt:], q.nextQ...)
+	q.prevQ = q.prevQ[:len(q.prevQ)-amt]
+}
+
+func (q *Queue) GetDataQueue(lookBehind int) []Metadata {
+	if lookBehind > len(q.prevQ) {
+		lookBehind = len(q.prevQ)
+	}
+
+	items := make([]QueueItem, len(q.nextQ)+lookBehind)
+	out := make([]Metadata, len(items))
+
+	if lookBehind > 0 {
+		copy(items, q.prevQ[len(q.prevQ)-lookBehind:])
+	}
+	copy(items[lookBehind:], q.nextQ)
+
+	for i, e := range items {
+		out[i] = e.metadata
 	}
 
 	return out

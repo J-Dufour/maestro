@@ -154,43 +154,69 @@ func (b *BorderedWindowController) Draw() {
 
 func NewQueueWindowController(player *audio.Player) Controller {
 	return NewBaseWindowController(func(buildCommand func() *CommandBuilder, con ControllerChannels) {
+		MAX_LOOKBEHIND := 3
+
 		queueUpdated := make(chan struct{})
 		songUpdated := make(chan struct{})
 
 		player.SubscribeToQueueUpdate(queueUpdated)
 		player.SubscribeToSourceChange(songUpdated)
 
-		queue := player.GetQueue()
-		curIdx := 0
+		queue := player.GetQueue(MAX_LOOKBEHIND)
+		var curItem audio.Metadata
 		maxIdxLen := 1
 
 		dims := area{0, 0}
 		for {
 			select {
 			case <-queueUpdated:
-				queue = player.GetQueue()
+				queue = player.GetQueue(MAX_LOOKBEHIND)
 				if length := len(queue); length == 0 {
 					maxIdxLen = 1
 				} else {
 					maxIdxLen = 1 + int(math.Log10(float64(length)))
 				}
+
+				curIdx := -1
+				for i, e := range queue {
+					if e.Filepath == curItem.Filepath {
+						curIdx = i
+						break
+					}
+				}
 				DrawQueue(buildCommand(), queue, curIdx, maxIdxLen, dims.w, dims.h)
 
 			case <-songUpdated:
 				builder := buildCommand()
-				if curIdx < len(queue) {
-					builder.MoveTo(1, uint(curIdx+1))
-					WriteQueueLine(builder, curIdx+1, maxIdxLen, queue[curIdx], dims.w-2-maxIdxLen, false)
+
+				// find current item
+				for i, e := range queue {
+					if e.Filepath == curItem.Filepath {
+						builder.MoveTo(1, uint(i+1))
+						WriteQueueLine(builder, i+1, maxIdxLen, e, dims.w-2-maxIdxLen, false)
+						break
+					}
 				}
-				curIdx = player.GetPositionInQueue()
-				if curIdx < len(queue) {
-					builder.MoveTo(1, uint(curIdx+1))
-					WriteQueueLine(builder, curIdx+1, maxIdxLen, queue[curIdx], dims.w-2-maxIdxLen, true)
+				curItem = player.GetCurrentSourceMetadata()
+				for i, e := range queue {
+					if e.Filepath == curItem.Filepath {
+						builder.MoveTo(1, uint(i+1))
+						WriteQueueLine(builder, i+1, maxIdxLen, e, dims.w-2-maxIdxLen, true)
+						break
+					}
 				}
 				builder.Exec()
 
 			case newDims := <-con.ResizeChan:
 				dims = newDims
+				curIdx := -1
+				for i, e := range queue {
+					if e.Filepath == curItem.Filepath {
+						curIdx = i
+						break
+					}
+				}
+
 				DrawQueue(buildCommand(), queue, curIdx, maxIdxLen, dims.w, dims.h)
 			case <-con.TerminateChan:
 				return
@@ -248,12 +274,7 @@ func NewPlayerWindowController(player *audio.Player) Controller {
 		songUpdated := make(chan struct{})
 		player.SubscribeToSourceChange(songUpdated)
 
-		var curSource audio.Metadata
-		if idx := player.GetPositionInQueue(); 0 <= idx && idx < len(player.GetQueue()) {
-			curSource = player.GetQueue()[player.GetPositionInQueue()]
-		} else {
-			curSource = *audio.NewMetadata()
-		}
+		curSource := player.GetCurrentSourceMetadata()
 
 		dims := area{0, 0}
 		infoLines := []int{1}
@@ -264,9 +285,8 @@ func NewPlayerWindowController(player *audio.Player) Controller {
 		for {
 			select {
 			case <-songUpdated:
-				if idx := player.GetPositionInQueue(); 0 <= idx && idx < len(player.GetQueue()) {
-					curSource = player.GetQueue()[player.GetPositionInQueue()]
-				}
+				curSource = player.GetCurrentSourceMetadata()
+
 				DrawInfo(buildCommand(), curSource, infoLines, int64(player.GetPositionInTrack()), dims)
 
 			case newDims := <-con.ResizeChan:
