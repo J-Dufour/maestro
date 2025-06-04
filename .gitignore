@@ -21,3 +21,9 @@
 go.work
 
 .vscode
+
+# output
+result
+
+# direnv
+.direnv
