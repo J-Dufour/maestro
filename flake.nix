@@ -16,6 +16,9 @@
       devShells.${system}.default =
         with pkgs;
         pkgs.mkShell {
+          GOOS = "windows";
+          GOARCH = "amd64";
+
           buildInputs = [
             go
           ];
