@@ -450,7 +450,7 @@ func (q *Queue) RemoveNextItems(amt int) {
 }
 
 func (q *Queue) SeekBackwards(amt int) {
-	if amt <= 0 {
+	if amt <= 0 || amt > len(q.prevQ) {
 		return
 	}
 
