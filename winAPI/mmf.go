@@ -42,13 +42,6 @@ var (
 
 	MFAudioFormat_Base = windows.GUID{Data1: 0x00000000, Data2: 0x0000, Data3: 0x0010, Data4: [8]byte{0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}}
 	MFMediaType_Audio  = windows.GUID{Data1: 0x73647561, Data2: 0x0000, Data3: 0x0010, Data4: [8]byte{0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}}
-
-	MF_METADATA_PROVIDER_SERVICE = windows.GUID{Data1: 0xdb214084, Data2: 0x58a4, Data3: 0x4d2e, Data4: [8]byte{0xb8, 0x4f, 0x6f, 0x75, 0x5b, 0x2f, 0x7a, 0xd}}
-	MF_PROPERTY_HANDLER_SERVICE  = windows.GUID{Data1: 0xa3face02, Data2: 0x32b8, Data3: 0x41dd, Data4: [8]byte{0x90, 0xe7, 0x5f, 0xef, 0x7c, 0x89, 0x91, 0xb5}}
-	MF_MEDIASOURCE_SERVICE       = windows.GUID{Data1: 0xf09992f7, Data2: 0x9fba, Data3: 0x4c4a, Data4: [8]byte{0xa3, 0x7f, 0x8c, 0x47, 0xb4, 0xe1, 0xdf, 0xe7}}
-
-	IID_IMFMetadataProvider = windows.GUID{Data1: 0x56181D2D, Data2: 0xE221, Data3: 0x4adb, Data4: [8]byte{0xB1, 0xC8, 0x3C, 0xEE, 0x6A, 0x53, 0xF7, 0x6F}}
-	IID_IMFMediaSource      = windows.GUID{0x279A808D, 0xAEC7, 0x40C8, [8]byte{0x9C, 0x6B, 0xA6, 0xB4, 0x92, 0xC7, 0x8A, 0x66}}
 )
 
 const (
@@ -58,7 +51,6 @@ const (
 
 	MF_SOURCE_READER_FIRST_AUDIO_STREAM = 0xFFFFFFFD
 	MF_SOURCE_READER_ANY_STREAM         = 0xFFFFFFFE
-	MF_SOURCE_READER_MEDIASOURCE        = 0xFFFFFFFF
 
 	MFSTARTUP_FULL = uint32(0)
 )
@@ -183,17 +175,6 @@ func (s MFSourceReader) GetWaveFormat() (w *WaveFormatExtensible, err error) {
 
 	return getWaveFormatFromMediaType(mediaType)
 
-}
-
-func (s MFSourceReader) GetMediaSource() (source *MFMediaSource, err error) {
-	var mediaSourcePtr **MFMediaSourceVtbl
-	r1, _, _ := syscall.SyscallN(s.vtbl.GetServiceForStream, s.ptr, uintptr(MF_SOURCE_READER_MEDIASOURCE), uintptr(unsafe.Pointer(&GUID_null)), uintptr(unsafe.Pointer(&IID_IMFMediaSource)), uintptr(unsafe.Pointer(&mediaSourcePtr)))
-	if uint32(r1) != uint32(windows.S_OK) {
-		return nil, errors.New("could not get media source")
-	}
-
-	source = &MFMediaSource{ptr: uintptr(unsafe.Pointer(mediaSourcePtr)), vtbl: *mediaSourcePtr}
-	return source, nil
 }
 
 func (s MFSourceReader) SetCurrentPosition(position *PropVariant) error {
@@ -404,39 +385,6 @@ func (w MFSinkWriter) BeginWriting() (err error) {
 	}
 
 	return nil
-}
-
-type MFMediaSource struct {
-	ptr  uintptr
-	vtbl *MFMediaSourceVtbl
-}
-
-type MFMediaSourceVtbl struct {
-	queryInterface uintptr
-	addref         uintptr
-	release        uintptr
-
-	GetEvent      uintptr
-	BeginGetEvent uintptr
-	EndGetEvent   uintptr
-	QueueEvent    uintptr
-
-	GetCharacteristics           uintptr
-	CreatePresentationDescriptor uintptr
-	Start                        uintptr
-	Stop                         uintptr
-	Pause                        uintptr
-	Shutdown                     uintptr
-}
-
-func (source MFMediaSource) GetPropertyStore() (propStore *PropertyStore, err error) {
-	var propStorePtr **PropertyStoreVtbl
-	r1, _, _ := MFGetService.Call(source.ptr, uintptr(unsafe.Pointer(&MF_PROPERTY_HANDLER_SERVICE)), uintptr(unsafe.Pointer(&IID_IPropertyStore)), uintptr(unsafe.Pointer(&propStorePtr)))
-	if uint32(r1) != uint32(windows.S_OK) {
-		return nil, errors.New("could not get property store")
-	}
-
-	return &PropertyStore{ptr: uintptr(unsafe.Pointer(propStorePtr)), vtbl: *propStorePtr}, nil
 }
 
 type PropertyStore struct {

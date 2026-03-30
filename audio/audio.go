@@ -83,7 +83,7 @@ type AudioSource interface {
 }
 
 type AudioSourceProvider struct {
-	GetAudioSourceFromFile func(filepath string) (AudioSource, error)
+	GetAudioSourceFromFile func(metadata *Metadata) (AudioSource, error)
 }
 
 type Player struct {
@@ -524,7 +524,7 @@ func (i *QueueItem) Source() (AudioSource, error) {
 }
 
 func (i *QueueItem) loadSource() error {
-	s, err := GetAudioSourceProvider().GetAudioSourceFromFile(i.metadata.Filepath)
+	s, err := GetAudioSourceProvider().GetAudioSourceFromFile(&i.metadata)
 	if err != nil {
 		return err
 	}

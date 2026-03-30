@@ -115,28 +115,11 @@ func WinGetFileMetadata(path string) (*Metadata, error) {
 	return out, nil
 }
 
-func createWinAudioSourceFromFile(path string) (AudioSource, error) {
-	sourceReader, err := win32.CreateSourceReaderFromFile(path)
+func createWinAudioSourceFromFile(metadata *Metadata) (AudioSource, error) {
+	sourceReader, err := win32.CreateSourceReaderFromFile(metadata.Filepath)
 	if err != nil {
 		return nil, err
 	}
-	metadata := NewMetadata()
-	metadata.Filepath = path
-
-	// get media source
-	mediaSource, err := sourceReader.GetMediaSource()
-	if err != nil {
-		return nil, err
-	}
-
-	// get metadata provider
-	propStore, err := mediaSource.GetPropertyStore()
-	if err != nil {
-		return &WinAudioSource{metadata, sourceReader}, nil
-	}
-
-	// get metadata
-	loadPropStoreToMetadata(propStore, metadata)
 
 	return &WinAudioSource{metadata, sourceReader}, nil
 }
