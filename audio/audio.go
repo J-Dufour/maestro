@@ -296,18 +296,16 @@ func (player *Player) playerThread() {
 				if amt == 0 { //if skipping 0 songs, or if index is already waiting, skip
 					player.controlDone <- struct{}{}
 					break
-				} else if amt > 1 {
-					player.queue.RemoveNextItems(amt - 1)
-				} else if amt < 0 {
-					player.queue.SeekBackwards(-amt + 1)
+				} else {
+					player.queue.Skip(amt)
 				}
 
 				// interrupt current song
 				leftover = leftover[:0]
 				client.ClearBuffer()
 
-				player.curSource.SetPosition(0)
-				player.curSource, waitingForNextTrack = player.queue.NextSource()
+				var nextSource AudioSource
+				nextSource, waitingForNextTrack = player.queue.NextSource()
 
 				if waitingForNextTrack {
 					player.curSource.SetPosition(int64(player.curSource.GetMetadata().Duration))
@@ -315,6 +313,8 @@ func (player *Player) playerThread() {
 					clock.Stop()
 				} else {
 					// play next song
+					player.curSource.SetPosition(0)
+					player.curSource = nextSource
 					player.trackPosition = 0
 					lastKnownTS = 0
 					clock.Reset(CLK_DUR)
@@ -337,12 +337,26 @@ func (player *Player) playerThread() {
 				player.client.ClearBuffer()
 				leftover = leftover[:0]
 
+				if waitingForNextTrack {
+					waitingForNextTrack = false
+					clock.Reset(CLK_DUR)
+					//player.client.Start()
+				}
+
 				player.controlDone <- struct{}{}
 
 			case CTL_SEEK_TO:
-				player.curSource.SetPosition(int64(<-player.control))
-				client.ClearBuffer()
+				newPos := int(<-player.control)
+				player.curSource.SetPosition(int64(newPos))
+				player.trackPosition = newPos
+
+				player.client.ClearBuffer()
 				leftover = leftover[:0]
+				if waitingForNextTrack {
+					waitingForNextTrack = false
+					clock.Reset(CLK_DUR)
+					//player.client.Start()
+				}
 				player.controlDone <- struct{}{}
 			}
 		case <-clock.C:
@@ -361,16 +375,16 @@ func (player *Player) playerThread() {
 				reachedEOF = false
 
 				// exit and move to next song
-				player.curSource.SetPosition(0)
-				player.curSource, waitingForNextTrack = player.queue.NextSource()
-
-				player.trackPosition = 0
-				lastKnownTS = 0
+				var nextSource AudioSource
+				nextSource, waitingForNextTrack = player.queue.NextSource()
 				if waitingForNextTrack {
 					clock.Stop()
-					player.publishSourceChange()
 					break
 				}
+				player.curSource.SetPosition(0)
+				player.trackPosition = 0
+				lastKnownTS = 0
+				player.curSource = nextSource
 				player.publishSourceChange()
 			}
 
@@ -435,9 +449,41 @@ func (q *Queue) NextSource() (s AudioSource, endOfQueue bool) {
 		_, err = nextItem.Source()
 		q.nextQ = q.nextQ[1:]
 	}
-	q.prevQ = append(q.prevQ, nextItem)
-	s, _ = nextItem.Source()
+	if err == nil {
+		q.prevQ = append(q.prevQ, nextItem)
+		s, _ = nextItem.Source()
+	}
 	return s, (len(q.nextQ) == 0 && s == nil)
+}
+
+func (q *Queue) forwardShift(amt int) {
+	if amt > len(q.nextQ) {
+		amt = len(q.nextQ)
+	} else if amt <= 0 {
+		return
+	}
+	q.prevQ = append(q.prevQ, q.nextQ[:amt]...)
+	q.nextQ = q.nextQ[amt:]
+}
+
+func (q *Queue) backShift(amt int) {
+	if amt > len(q.prevQ) {
+		amt = len(q.prevQ)
+	} else if amt <= 0 {
+		return
+	}
+
+	q.nextQ = append(q.prevQ[len(q.prevQ)-amt:], q.nextQ...)
+	q.prevQ = q.prevQ[:len(q.prevQ)-amt]
+}
+
+func (q *Queue) Skip(amt int) {
+	if amt < 0 {
+		q.backShift(-amt + 1)
+	} else if amt > 0 {
+		q.forwardShift(amt - 1)
+	}
+
 }
 
 // moves idx such that the next song is [amt] away from current song
