@@ -486,24 +486,6 @@ func (q *Queue) Skip(amt int) {
 
 }
 
-// moves idx such that the next song is [amt] away from current song
-func (q *Queue) RemoveNextItems(amt int) {
-	if amt <= 0 {
-		return
-	}
-
-	q.nextQ = q.nextQ[amt:]
-}
-
-func (q *Queue) SeekBackwards(amt int) {
-	if amt <= 0 || amt > len(q.prevQ) {
-		return
-	}
-
-	q.nextQ = append(q.prevQ[len(q.prevQ)-amt:], q.nextQ...)
-	q.prevQ = q.prevQ[:len(q.prevQ)-amt]
-}
-
 func (q *Queue) GetDataQueue(lookBehind int) []Metadata {
 	if lookBehind > len(q.prevQ) {
 		lookBehind = len(q.prevQ)
