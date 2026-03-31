@@ -85,8 +85,6 @@ func main() {
 	go inputDecoder(input, player)
 
 	// split
-	bottomWin := terminal.VSplit(pWin)
-	bottomWin.SetSelectable(false)
 	qWin := terminal.HSplit(pWin)
 
 	// make queue view
